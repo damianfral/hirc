@@ -1,0 +1,59 @@
+name: hirc
+version: 1.0.0.0
+
+license: MIT
+
+synopsis: haskell IRC client
+author: damianfral
+
+ghc-options:
+  - -fshow-warning-groups
+  - -Werror
+  - -Wall
+  - -Wcompat
+  - -Wcpp-undef
+  - -Widentities
+  - -Wincomplete-record-updates
+  - -Wincomplete-uni-patterns
+  - -Wpartial-fields
+  - -Wredundant-constraints
+  - -fwrite-ide-info
+  - -funbox-strict-fields
+  - -flate-dmd-anal
+  - -fno-omit-interface-pragmas
+
+library:
+  source-dirs:
+    - src
+  
+  dependencies:
+    - async
+    - base
+    - brick
+    - bytestring
+    - containers
+    - genvalidity
+    - genvalidity-text
+    - network
+    - optparse-generic
+    - QuickCheck
+    - relude
+    - stm
+    - text
+    - vty
+
+tests:
+  hirc-test:
+    main: Spec.hs
+    source-dirs: test
+    ghc-options:
+      - -threaded
+      - -rtsopts
+      - -with-rtsopts=-N
+    dependencies:
+      - base
+      - genvalidity-sydtest
+      - hirc
+      - relude
+      - sydtest
+      - sydtest-discover
