@@ -41,4 +41,4 @@ runCLIOptions Options {..} =
   withIRCClient host port $ \client -> do
     writeAction client
       $ Register (Nickname nickname) (Username username) (Realname realname)
-    runUI client (Nickname nickname)
+    runUI host client $ User (Nickname nickname) Nothing Nothing

@@ -8,124 +8,151 @@ module IRC.UI (runUI) where
 import Brick
 import qualified Brick.AttrMap as A
 import Brick.BChan (BChan, newBChan, writeBChan)
-import Brick.Widgets.Border (border, hBorder, vBorder)
-import Control.Concurrent.Async (Async, async, cancel)
+import Brick.Widgets.Border (border, borderWithLabel)
+import Brick.Widgets.Edit (Editor, editorText, getEditContents, handleEditorEvent, renderEditor)
+import Control.Concurrent.Async (async, cancel)
 import Data.Map (lookup)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Graphics.Vty as V
+import Graphics.Vty.CrossPlatform (mkVty)
 import IRC.Client
 import IRC.Domain
 import IRC.Protocol (Nickname (..), User (..))
+import Network.Socket (HostName)
 import Relude
 
-data ChatViewport = ChatViewport deriving (Show, Ord, Eq)
+data ViewportName
+  = ChatViewport
+  | ChatInput
+  | Scrollable ClickableScrollbarElement ViewportName
+  | ChatMembers
+  deriving (Show, Ord, Eq)
 
-data UIChannel = UIChannel
-  { uiChannelMessages :: [Text],
-    uiChannelNicknames :: Set Nickname
+data ChannelState = ChannelState
+  { channelMessages :: [Text],
+    channelNicknames :: Set Nickname
   }
 
-data UIState = UIState
-  { uiClient :: IRCClient,
-    uiNickname :: Nickname,
-    uiCurrentChannel :: Maybe Channel,
-    uiChannels :: Map Channel UIChannel,
-    uiServerMessages :: [Text],
-    uiInput :: Text,
-    uiConnected :: Bool,
-    uiReader :: Maybe (Async ())
+data AppState = AppState
+  { appClient :: IRCClient,
+    appUser :: User,
+    appChannels :: Map Channel ChannelState,
+    appCurrentChannel :: Maybe Channel,
+    appHost :: Text,
+    appHostMessages :: [Text],
+    appInput :: Editor Text ViewportName
   }
 
-runUI :: IRCClient -> Nickname -> IO ()
-runUI client nick = do
-  bchan <- newBChan 32
-  let startEvent = do
-        rd <- liftIO $ async $ ircClientToBChanEventLoop client bchan
-        modify (\ui -> ui {uiReader = Just rd})
-  let app =
-        App
-          { appDraw = drawUI,
-            appChooseCursor = showFirstCursor,
-            appHandleEvent = handleEvent,
-            appStartEvent = startEvent,
-            appAttrMap = const theAttrMap
-          }
-  (finalSt, _) <- customMainWithDefaultVty (Just bchan) app initialState
-  forM_ (uiReader finalSt) cancel
+uiApp :: App AppState Event ViewportName
+uiApp =
+  App
+    { appDraw = viewUI,
+      appChooseCursor = const $ showCursorNamed ChatInput,
+      appHandleEvent = handleEvent,
+      appStartEvent = pure (),
+      appAttrMap = const $ A.attrMap V.defAttr []
+    }
+
+handleEvent :: BrickEvent ViewportName Event -> EventM ViewportName AppState ()
+handleEvent (VtyEvent (V.EvKey V.KEsc [])) = haltWithQuit
+handleEvent (VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl])) = haltWithQuit
+handleEvent (VtyEvent (V.EvKey V.KPageUp [])) =
+  vScrollPage (viewportScroll ChatViewport) Brick.Up
+handleEvent (VtyEvent (V.EvKey V.KPageDown [])) =
+  vScrollPage (viewportScroll ChatViewport) Brick.Down
+handleEvent (VtyEvent (V.EvKey V.KEnter [])) = handleEnter
+handleEvent ev@(VtyEvent _) = do
+  st <- get
+  newEditor <- nestEventM' (appInput st) $ handleEditorEvent ev
+  put $ st {appInput = newEditor}
+handleEvent (AppEvent event) = do
+  modify $ updateState event
+  vScrollToEnd $ viewportScroll ChatViewport
+handleEvent (MouseDown (Scrollable _element vp) V.BScrollUp _mods _location) =
+  vScrollBy (viewportScroll vp) (-3)
+handleEvent (MouseDown (Scrollable _element vp) V.BScrollDown _mods _location) =
+  vScrollBy (viewportScroll vp) 3
+handleEvent (MouseDown (Scrollable element vp) _button _mods _location) =
+  case element of
+    SBHandleBefore -> vScrollBy (viewportScroll vp) (-1)
+    SBHandleAfter -> vScrollBy (viewportScroll vp) 1
+    SBTroughBefore -> vScrollPage (viewportScroll vp) Brick.Up
+    SBTroughAfter -> vScrollPage (viewportScroll vp) Brick.Down
+    SBBar -> pure ()
+handleEvent _ = pure ()
+
+runUI :: HostName -> IRCClient -> User -> IO ()
+runUI hostname client user = do
+  vty <- buildVty
+  bchan <- newBChan 256
+  bchanLoopAsync <- liftIO $ async $ ircClientToBChanEventLoop client bchan
+  void $ customMain vty buildVty (Just bchan) uiApp initialState
+  cancel bchanLoopAsync
   where
+    buildVty = do
+      v <- mkVty V.defaultConfig
+      V.setMode (V.outputIface v) V.Mouse True -- mouse support
+      pure v
     initialState =
-      UIState
-        { uiClient = client,
-          uiNickname = nick,
-          uiCurrentChannel = Nothing,
-          uiChannels = mempty,
-          uiServerMessages = [],
-          uiInput = "",
-          uiConnected = True,
-          uiReader = Nothing
+      AppState
+        { appClient = client,
+          appUser = user,
+          appCurrentChannel = Nothing,
+          appChannels = mempty,
+          appHostMessages = [],
+          appHost = toText hostname,
+          appInput = emptyEditor
         }
-    handleEvent (VtyEvent (V.EvKey key modifiers)) =
-      case (key, modifiers) of
-        (V.KEsc, []) -> haltWithQuit
-        (V.KChar 'c', [V.MCtrl]) -> haltWithQuit
-        (V.KEnter, []) -> handleEnter
-        (V.KBS, []) -> modify $ \ui -> ui {uiInput = T.dropEnd 1 (uiInput ui)}
-        (V.KDel, []) -> modify $ \ui -> ui {uiInput = T.dropEnd 1 (uiInput ui)}
-        (V.KChar c, []) -> modify $ \ui -> ui {uiInput = uiInput ui <> T.singleton c}
-        _ -> pure ()
-    handleEvent (AppEvent event) = do
-      modify $ updateState event
-      vScrollToEnd (viewportScroll ChatViewport)
-    handleEvent _ = pure ()
 
-theAttrMap :: A.AttrMap
-theAttrMap = A.attrMap V.defAttr []
+emptyEditor :: Editor Text ViewportName
+emptyEditor = editorText ChatInput Nothing ""
 
-drawMembers :: Channel -> Set Nickname -> Widget ChatViewport
-drawMembers channel nicks = hLimit 20 $ vBox $ do
-  mconcat
-    [ [txt $ renderChannelName channel],
-      [hBorder],
-      txt . unNickname <$> toList nicks,
-      [fill ' ']
-    ]
+resetUserInput :: AppState -> AppState
+resetUserInput st = st {appInput = emptyEditor}
 
-drawMessages :: [Text] -> Widget ChatViewport
-drawMessages msgs =
-  withVScrollBars OnRight $ viewport ChatViewport Vertical $ do
-    vBox $ txt <$> msgs
+viewMembers :: Set Nickname -> Widget ViewportName
+viewMembers nicks = vBox $ txt . unNickname <$> toList nicks
 
-drawUI :: UIState -> [Widget ChatViewport]
-drawUI UIState {..} =
-  [ vBox
-      $ ( case uiCurrentChannel of
-            Nothing -> [border $ drawMessages uiServerMessages]
-            Just channel ->
-              [ border
-                  $ hBox
-                    [ drawMessages $ fromMaybe [] currentChannelMessages,
-                      vBorder,
-                      drawMembers channel $ fromMaybe mempty currentChannelNicknames
-                    ]
-              ]
-        )
-      <> [vLimit 3 $ border $ hBox [str "> ", txt uiInput, fill ' ']]
-  ]
+viewChannelName :: Channel -> Widget n
+viewChannelName (Channel c) = txt $ " #" <> c <> " "
+
+viewMessages :: [Text] -> Widget ViewportName
+viewMessages msgs = withClickableVScrollBars Scrollable $ do
+  withVScrollBars OnRight $ viewport ChatViewport Vertical $ vBox $ txt <$> msgs
+
+viewUI :: AppState -> [Widget ViewportName]
+viewUI AppState {..} = [vBox [mainWidget, chatBar]]
   where
-    currentChannelMessages = case uiCurrentChannel of
-      Nothing -> Just uiServerMessages
+    mainWidget = case appCurrentChannel of
+      Nothing -> borderWithLabel (txt $ " " <> appHost <> " ") $ do
+        viewMessages appHostMessages
+      Just channel ->
+        hBox
+          [ borderWithLabel (viewChannelName channel)
+              $ viewMessages
+              $ fromMaybe [] currentChannelMessages,
+            hLimit 20
+              $ borderWithLabel (txt " members ")
+              $ withClickableVScrollBars Scrollable
+              $ withVScrollBars OnRight
+              $ viewport ChatMembers Vertical
+              $ viewMembers
+              $ fromMaybe mempty currentChannelNicknames
+          ]
+    currentChannelMessages = case appCurrentChannel of
+      Nothing -> Just appHostMessages
       Just chanName -> do
-        uiChann <- lookup chanName uiChannels
-        pure $ uiChannelMessages uiChann
+        uiChann <- lookup chanName appChannels
+        pure $ channelMessages uiChann
     currentChannelNicknames = do
-      chanName <- uiCurrentChannel
-      uiChann <- lookup chanName uiChannels
-      pure $ uiChannelNicknames uiChann
-
-renderChannelName :: Channel -> Text
-renderChannelName (Channel c) = "#" <> c
+      chanName <- appCurrentChannel
+      uiChann <- lookup chanName appChannels
+      pure $ channelNicknames uiChann
+    chatBar = vLimit 3 $ border $ hBox [str "> ", inputWidget]
+    inputWidget = renderEditor viewEditorLines True appInput
+    viewEditorLines = txt . T.unlines
 
 ircClientToBChanEventLoop :: IRCClient -> BChan Event -> IO ()
 ircClientToBChanEventLoop client bchan = loop
@@ -137,130 +164,162 @@ ircClientToBChanEventLoop client bchan = loop
         Disconnected _ -> pure ()
         _ -> loop
 
-haltWithQuit :: EventM ChatViewport UIState ()
+haltWithQuit :: EventM ViewportName AppState ()
 haltWithQuit = do
-  UIState {..} <- get
-  liftIO $ do
-    writeAction uiClient (Quit Nothing)
-    forM_ uiReader cancel
+  AppState {..} <- get
+  liftIO $ writeAction appClient (Quit Nothing)
   halt
 
-handleEnter :: EventM ChatViewport UIState ()
+handleEnter :: EventM ViewportName AppState ()
 handleEnter = do
-  ui@UIState {..} <- get
-  case T.strip uiInput of
+  AppState {..} <- get
+  let content = T.intercalate "\n" $ T.strip <$> getEditContents appInput
+  case content of
     "" -> pure ()
     msg
       | "/join" `T.isPrefixOf` msg -> handleJoin msg
+      | "/part" `T.isPrefixOf` msg -> handleLeave
       | "/list" `T.isPrefixOf` msg -> handleList
       | "/quit" `T.isPrefixOf` msg -> handleQuit msg
-      | otherwise -> handleSend ui msg
+      | otherwise -> handleSend msg
 
-  modify $ \s -> s {uiInput = ""}
+  modify resetUserInput
+  case appCurrentChannel of
+    Nothing -> pure ()
+    Just channel -> do
+      let msg = MessageReceived appUser (TargetChannel channel) content
+      handleEvent $ AppEvent msg
 
-handleJoin :: Text -> EventM ChatViewport UIState ()
+handleJoin :: Text -> EventM ViewportName AppState ()
 handleJoin msg = case T.words msg of
   [_cmd, ch] -> do
     let channel = Channel (T.dropWhile (== '#') ch)
-    ui <- get
-    liftIO $ writeAction (uiClient ui) $ JoinChannel channel
-    let newUIChannel =
-          UIChannel
-            { uiChannelMessages = mempty,
-              uiChannelNicknames = mempty
+    st <- get
+    liftIO $ writeAction (appClient st) $ JoinChannel channel
+    let newChannelState =
+          ChannelState
+            { channelMessages = mempty,
+              channelNicknames = mempty
             }
-    modify $ \ui' ->
-      ui'
-        { uiChannels = Map.insert channel newUIChannel (uiChannels ui'),
-          uiCurrentChannel = Just channel
+    modify $ \st' ->
+      st'
+        { appChannels = Map.insert channel newChannelState (appChannels st'),
+          appCurrentChannel = Just channel
         }
   _ -> pure ()
 
-handleList :: EventM ChatViewport UIState ()
-handleList = get >>= \ui -> liftIO $ writeAction (uiClient ui) ListChannels
+handleLeave :: EventM ViewportName AppState ()
+handleLeave = do
+  st <- get
+  case appCurrentChannel st of
+    Nothing -> pure ()
+    Just channel -> do
+      liftIO $ writeAction (appClient st) $ LeaveChannel channel Nothing
+      let newChannelState =
+            ChannelState
+              { channelMessages = mempty,
+                channelNicknames = mempty
+              }
+      modify $ \st' ->
+        st'
+          { appChannels = Map.insert channel newChannelState (appChannels st'),
+            appCurrentChannel = Nothing
+          }
 
-handleQuit :: Text -> EventM ChatViewport UIState ()
+handleList :: EventM ViewportName AppState ()
+handleList = get >>= \st -> liftIO $ writeAction (appClient st) ListChannels
+
+handleQuit :: Text -> EventM ViewportName AppState ()
 handleQuit msg = do
   let reason = case T.words msg of
         [_cmd, r] -> Just (Reason r)
         _ -> Nothing
-  UIState {..} <- get
-  liftIO $ forM_ uiReader cancel
-  liftIO $ writeAction uiClient (Quit reason)
+  AppState {..} <- get
+  liftIO $ writeAction appClient (Quit reason)
   halt
 
-handleSend :: UIState -> Text -> EventM ChatViewport UIState ()
-handleSend ui text = case uiCurrentChannel ui of
-  Nothing -> pure ()
-  Just ch -> do
-    let target = TargetChannel ch
-    liftIO $ writeAction (uiClient ui) $ SendMessage target text
+handleSend :: Text -> EventM ViewportName AppState ()
+handleSend "" = pure ()
+handleSend text = do
+  st <- get
+  case appCurrentChannel st of
+    Nothing -> pure ()
+    Just channel -> do
+      let target = TargetChannel channel
+      liftIO $ writeAction (appClient st) $ SendMessage target text
 
-updateState :: Event -> UIState -> UIState
+updateState :: Event -> AppState -> AppState
 updateState (Connected server _welcome) =
-  appendServerMessages ["Connected to " <> show server]
+  appendServerMessage $ "Connected to " <> show server
 updateState (MessageReceived user (TargetChannel channel) msg) =
-  appendMessageToUIChannel [nickOf user <> ": " <> msg] channel
+  appendMessage (Just $ nickname user) msg channel
 updateState (NoticeReceived user (TargetChannel channel) msg) =
-  appendMessageToUIChannel ["[NOTICE] " <> nickOf user <> ": " <> msg] channel
+  appendMessage Nothing ("[NOTICE] " <> nickOf user <> ": " <> msg) channel
 updateState (UserJoined user channel) =
   let msg = "--> " <> nickOf user <> " joined"
-   in modifyUIChannel channel $ \uiChannel@UIChannel {..} ->
+   in modifyChannel channel $ \uiChannel@ChannelState {..} ->
         uiChannel
-          { uiChannelMessages = uiChannelMessages <> [msg],
-            uiChannelNicknames = Set.insert (nickname user) uiChannelNicknames
+          { channelMessages = channelMessages <> [msg],
+            channelNicknames = Set.insert (nickname user) channelNicknames
           }
 updateState (UserLeft user channel _reason) =
-  appendMessageToUIChannel ["<-- " <> nickOf user <> " left"] channel
+  appendMessage Nothing ("<-- " <> nickOf user <> " left") channel
     . removeNicknameFromChannel (nickname user) channel
 updateState (NickChanged user n@(Nickname nick)) =
-  appendServerMessages [nickOf user <> " is now known as " <> nick]
-    . modifyUserNick user n
+  appendServerMessage (nickOf user <> " is now known as " <> nick)
+    . modifyUserNick (nickname user) n
 updateState (UserDisconnected user _reason) =
-  appendServerMessages ["<-- " <> nickOf user <> " quit"]
+  appendServerMessage ("<-- " <> nickOf user <> " quit")
     . removeNicknameFromAllChannels (nickname user)
 updateState (ChannelUsers channel nicks) = addNicknamesToChannel nicks channel
 updateState (ChannelListEntry channel count topic) =
-  appendMessageToUIChannel ["[LIST] " <> channelShow channel <> " (" <> show count <> " users) " <> topic] channel
-updateState (Disconnected reason) = appendServerMessages ["Disconnected: " <> reason]
+  let msg =
+        unwords
+          ["[LIST]", channelShow channel, "(" <> show count <> " users)", topic]
+   in appendMessage Nothing msg channel
+updateState (Disconnected reason) =
+  appendServerMessage $ "Disconnected: " <> reason
 updateState _ = id
 
 --------------------------------------------------------------------------------
 
-modifyUIChannel :: Channel -> (UIChannel -> UIChannel) -> UIState -> UIState
-modifyUIChannel channel update ui =
-  ui {uiChannels = Map.adjust update channel (uiChannels ui)}
+modifyChannel ::
+  Channel -> (ChannelState -> ChannelState) -> AppState -> AppState
+modifyChannel channel update st =
+  st {appChannels = Map.adjust update channel (appChannels st)}
 
-appendMessageToUIChannel :: [Text] -> Channel -> UIState -> UIState
-appendMessageToUIChannel msg channel =
-  modifyUIChannel channel $ \uiChannel ->
-    uiChannel {uiChannelMessages = uiChannelMessages uiChannel <> msg}
+appendMessage :: Maybe Nickname -> Text -> Channel -> AppState -> AppState
+appendMessage Nothing msg channel =
+  modifyChannel channel $ \uiChannel ->
+    uiChannel {channelMessages = channelMessages uiChannel <> [msg]}
+appendMessage (Just (Nickname nick)) msg channel =
+  appendMessage Nothing (nick <> ": " <> msg) channel
 
-appendServerMessages :: [Text] -> UIState -> UIState
-appendServerMessages msgs ui =
-  ui {uiServerMessages = uiServerMessages ui <> msgs}
+appendServerMessage :: Text -> AppState -> AppState
+appendServerMessage msg st =
+  st {appHostMessages = appHostMessages st <> [msg]}
 
-addNicknamesToChannel :: Set Nickname -> Channel -> UIState -> UIState
-addNicknamesToChannel users channel = modifyUIChannel channel $ \uiChannel ->
-  uiChannel {uiChannelNicknames = users <> uiChannelNicknames uiChannel}
+addNicknamesToChannel :: Set Nickname -> Channel -> AppState -> AppState
+addNicknamesToChannel users channel = modifyChannel channel $ \uiChannel ->
+  uiChannel {channelNicknames = users <> channelNicknames uiChannel}
 
-removeNicknameFromChannel :: Nickname -> Channel -> UIState -> UIState
-removeNicknameFromChannel user channel = modifyUIChannel channel $ \uiChannel ->
-  uiChannel {uiChannelNicknames = Set.delete user $ uiChannelNicknames uiChannel}
+removeNicknameFromChannel :: Nickname -> Channel -> AppState -> AppState
+removeNicknameFromChannel user channel = modifyChannel channel $ \uiChannel@ChannelState {..} ->
+  uiChannel {channelNicknames = Set.delete user channelNicknames}
 
-removeNicknameFromAllChannels :: Nickname -> UIState -> UIState
-removeNicknameFromAllChannels nick = modifyAllUIChannels $ \uiChannel ->
-  uiChannel {uiChannelNicknames = Set.delete nick $ uiChannelNicknames uiChannel}
+removeNicknameFromAllChannels :: Nickname -> AppState -> AppState
+removeNicknameFromAllChannels nick = modifyAllChannels $ \uiChannel ->
+  uiChannel {channelNicknames = Set.delete nick $ channelNicknames uiChannel}
 
-modifyAllUIChannels :: (UIChannel -> UIChannel) -> UIState -> UIState
-modifyAllUIChannels update ui =
-  ui {uiChannels = update <$> uiChannels ui}
+modifyAllChannels :: (ChannelState -> ChannelState) -> AppState -> AppState
+modifyAllChannels update st = st {appChannels = update <$> appChannels st}
 
-modifyUserNick :: User -> Nickname -> UIState -> UIState
-modifyUserNick user newNick = modifyAllUIChannels $ \uiChannel ->
-  uiChannel {uiChannelNicknames = Set.delete oldNick $ Set.insert newNick $ uiChannelNicknames uiChannel}
-  where
-    oldNick = nickname user
+modifyUserNick :: Nickname -> Nickname -> AppState -> AppState
+modifyUserNick oldNick newNick = modifyAllChannels $ \uiChannel ->
+  uiChannel
+    { channelNicknames =
+        Set.delete oldNick $ Set.insert newNick $ channelNicknames uiChannel
+    }
 
 --------------------------------------------------------------------------------
 

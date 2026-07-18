@@ -41,6 +41,7 @@ library:
     - stm
     - text
     - vty
+    - vty-crossplatform
 
 executables:
   hirc:
