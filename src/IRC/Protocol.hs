@@ -61,6 +61,7 @@ data Command
   | PONG
   | QUIT
   | LIST
+  | NAMES
   | Numeric Int
   deriving (Show, Eq, Generic)
 
@@ -214,6 +215,7 @@ parseCommand t = case t of
   "PONG" -> Just PONG
   "QUIT" -> Just QUIT
   "LIST" -> Just LIST
+  "NAMES" -> Just NAMES
   _ -> case TR.decimal t of
     Right (n, _) -> Just (Numeric n)
     _ -> Nothing

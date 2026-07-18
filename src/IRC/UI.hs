@@ -116,7 +116,7 @@ viewMembers :: Set Nickname -> Widget ViewportName
 viewMembers nicks = vBox $ txt . unNickname <$> toList nicks
 
 viewChannelName :: Channel -> Widget n
-viewChannelName (Channel c) = txt $ " #" <> c <> " "
+viewChannelName = txt . channelToText
 
 viewMessages :: [Text] -> Widget ViewportName
 viewMessages msgs = withClickableVScrollBars Scrollable $ do
@@ -179,6 +179,7 @@ handleEnter = do
     msg
       | "/join" `T.isPrefixOf` msg -> handleJoin msg
       | "/part" `T.isPrefixOf` msg -> handleLeave
+      | "/names" `T.isPrefixOf` msg -> handleNames
       | "/list" `T.isPrefixOf` msg -> handleList
       | "/quit" `T.isPrefixOf` msg -> handleQuit msg
       | otherwise -> handleSend msg
@@ -229,6 +230,13 @@ handleLeave = do
 handleList :: EventM ViewportName AppState ()
 handleList = get >>= \st -> liftIO $ writeAction (appClient st) ListChannels
 
+handleNames :: EventM ViewportName AppState ()
+handleNames = do
+  st <- get
+  case appCurrentChannel st of
+    Nothing -> pure ()
+    Just channel -> liftIO $ writeAction (appClient st) (ListMembers channel)
+
 handleQuit :: Text -> EventM ViewportName AppState ()
 handleQuit msg = do
   let reason = case T.words msg of
@@ -275,7 +283,7 @@ updateState (ChannelUsers channel nicks) = addNicknamesToChannel nicks channel
 updateState (ChannelListEntry channel count topic) =
   let msg =
         unwords
-          ["[LIST]", channelShow channel, "(" <> show count <> " users)", topic]
+          ["[LIST]", channelToText channel, "(" <> show count <> " users)", topic]
    in appendMessage Nothing msg channel
 updateState (Disconnected reason) =
   appendServerMessage $ "Disconnected: " <> reason
@@ -322,11 +330,6 @@ modifyUserNick oldNick newNick = modifyAllChannels $ \uiChannel ->
     }
 
 --------------------------------------------------------------------------------
-
-channelShow :: Channel -> Text
-channelShow (Channel c)
-  | "#" `T.isPrefixOf` c = c
-  | otherwise = "#" <> c
 
 nickOf :: User -> Text
 nickOf = (\(Nickname n) -> n) . nickname
