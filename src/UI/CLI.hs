@@ -6,16 +6,16 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
-module IRC.CLI where
+module UI.CLI where
 
 import Data.Version (showVersion)
 import IRC.Client
 import IRC.Domain
 import IRC.Protocol
-import IRC.UI (runUI)
 import Options.Generic
 import Paths_hirc (version)
 import Relude
+import UI (runUI)
 
 data Options w = Options
   { nickname :: w ::: Text,
@@ -31,9 +31,7 @@ instance ParseRecord (Options Wrapped) where
   parseRecord = parseRecordWithModifiers lispCaseModifiers
 
 runCLI :: IO ()
-runCLI = do
-  unwrapRecord msg >>= runCLIOptions
-  exitSuccess
+runCLI = unwrapRecord msg >>= runCLIOptions >> exitSuccess
   where
     msg = unwords ["hirc", "v" <> show (showVersion version)]
 

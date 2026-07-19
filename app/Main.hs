@@ -2,8 +2,8 @@
 
 module Main where
 
-import IRC.CLI
 import Relude
+import UI.CLI
 
 main :: IO ()
 main = runCLI
