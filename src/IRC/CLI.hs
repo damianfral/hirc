@@ -39,7 +39,7 @@ runCLI = do
 
 runCLIOptions :: Options Unwrapped -> IO ()
 runCLIOptions Options {..} =
-  withIRCClient host port logFile $ \client -> do
+  withIRCClient (IRCClientSettings host port logFile) $ \client -> do
     writeAction client
       $ Register (Nickname nickname) (Username username) (Realname realname)
     runUI host client $ User (Nickname nickname) Nothing Nothing
