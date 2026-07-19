@@ -218,6 +218,8 @@ handleSendMessage text = do
     Just channel -> do
       let target = TargetChannel channel
       liftIO $ writeAction (appClient st) $ SendMessage target text
+      -- Since we have not implemented echo-message, just append the message.
+      modify $ appendMessage text channel (Just $ nickname $ appUser st)
 
 handleHelp :: EventM ViewportName AppState ()
 handleHelp = do
