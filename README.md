@@ -26,7 +26,7 @@ $ nix run github:damianfral/hirc -- \
 ```sh
 $ nix run . -- --help
 
-hirc v"1.0.0.0"
+hirc v1.0.0.0
 
 Usage: hirc --nickname TEXT --username TEXT --realname TEXT [--host HOSTNAME]
             [--port PORT] [--log-file FILE]

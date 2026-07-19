@@ -76,7 +76,7 @@ runCLI = execParser opts >>= runCLIOptions
     opts = info (optionsParser <**> helper) infoMod
     infoMod =
       fullDesc
-        <> header ("hirc v" <> show (showVersion version))
+        <> header ("hirc v" <> showVersion version)
         <> progDesc "Haskell IRC client"
 
 runCLIOptions :: Options -> IO ()
