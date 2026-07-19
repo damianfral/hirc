@@ -1,5 +1,4 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
@@ -109,15 +108,15 @@ newtype Username = Username Text
 -- >>> encodeMessage (Message Nothing PING (Params ["irc.libera.chat"]))
 -- "PING :irc.libera.chat\r\n"
 encodeMessage :: Message -> Text
-encodeMessage (Message prefix command params) =
-  prefixPart <> commandText <> encodeParams params <> "\r\n"
+encodeMessage (Message pre cmd ps) =
+  prefixPart <> commandText <> encodeParams ps <> "\r\n"
   where
-    prefixPart = case prefix of
+    prefixPart = case pre of
       Nothing -> ""
       Just p -> ":" <> encodePrefix p <> " "
-    commandText = case command of
+    commandText = case cmd of
       Numeric n -> show n
-      cmd -> show cmd
+      nonNumeric -> show nonNumeric
 
 -- | Serialise a 'Prefix' to wire format (without the leading @:@).
 --
@@ -130,14 +129,13 @@ encodeMessage (Message prefix command params) =
 -- "alice!alice@example.com"
 encodePrefix :: Prefix -> Text
 encodePrefix (PrefixServer (Server name)) = name
-encodePrefix (PrefixUser User {nickname, username, host}) =
+encodePrefix (PrefixUser (User (Nickname nick) mUsername mHost)) =
   nick <> userPart <> hostPart
   where
-    Nickname nick = nickname
-    userPart = case username of
+    userPart = case mUsername of
       Nothing -> ""
       Just (Username name) -> "!" <> name
-    hostPart = case host of
+    hostPart = case mHost of
       Nothing -> ""
       Just hostName -> "@" <> hostName
 
@@ -181,16 +179,16 @@ decodeMessage txt = do
   (mPrefix, rest) <- parsePrefix txt
   let (cmdStr, rest') = T.breakOn " " rest
   cmd <- parseCommand $ T.stripEnd cmdStr
-  let params = parseParams $ T.stripStart rest'
-  Just $ Message mPrefix cmd params
+  let ps = parseParams $ T.stripStart rest'
+  Just $ Message mPrefix cmd ps
   where
     -- If the raw line starts with ':', the prefix runs from char 1
     -- up to the first space.  Otherwise there is no prefix.
     parsePrefix t
       | ":" `T.isPrefixOf` t = do
           let (p, r) = T.breakOn " " (T.drop 1 t)
-          prefix <- decodePrefix p
-          Just (Just prefix, T.stripStart r)
+          pref <- decodePrefix p
+          Just (Just pref, T.stripStart r)
       | otherwise = Just (Nothing, t)
 
 -- | Match a known verbatim command name, or fall back to a 3-digit
@@ -245,9 +243,9 @@ decodePrefix t
           (u, h) = T.breakOn "@" (T.drop 1 rest1)
           (userStr, hostStr) =
             (u, if T.null h then Nothing else Just (T.drop 1 h))
-          username = if T.null userStr then Nothing else Just (Username userStr)
-          prefix = PrefixUser $ User (Nickname nickStr) username hostStr
-       in Just prefix
+          uname = if T.null userStr then Nothing else Just (Username userStr)
+          pref = PrefixUser $ User (Nickname nickStr) uname hostStr
+       in Just pref
   | "@" `T.isInfixOf` t =
       -- no '!', so it's nick@host without a username
       let (nickStr, hostStr) = T.breakOn "@" t
@@ -277,19 +275,19 @@ parseParams t = Params $ case break (":" `T.isPrefixOf`) (T.words t) of
 
 instance Validity Params where
   validate (Params []) = mempty
-  validate (Params params) = middleV <> lastV <> allV
+  validate (Params ps) = middleV <> lastV <> allV
     where
       allV = mconcat $ do
-        p <- params
+        p <- ps
         [checkNoLinebreak p "Param contains carriage return"]
       dropLast = reverse . drop 1 . reverse
       middleV = mconcat $ do
-        x <- dropLast params
+        x <- dropLast ps
         [ check (not (":" `T.isPrefixOf` x)) "Middle param starts with ':'",
           checkNoSpaces x "Middle param contains whitespace",
           checkNotNull x "Middle param is empty"
           ]
-      lastV = case params of
+      lastV = case ps of
         [x] -> check (not (T.all isSpace x)) "Trailing param is all-whitespace"
         _ -> mempty
 
@@ -309,9 +307,9 @@ instance GenValid Params where
         Params <$> replicateM n (genFromChars safeChar 1 10)
       genWithTrailing = do
         n <- choose (0, 3)
-        params <- replicateM n (genFromChars safeChar 1 10)
+        ps <- replicateM n (genFromChars safeChar 1 10)
         trailing <- T.stripEnd <$> genFromChars safeTrailingChar 0 15
-        pure $ Params $ params <> [trailing]
+        pure $ Params $ ps <> [trailing]
       genFromChars chars minLen maxLen = do
         len <- choose (minLen, maxLen)
         T.pack <$> replicateM len chars

@@ -1,4 +1,3 @@
-{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
@@ -36,37 +35,37 @@ data IRCState = IRCState
   }
 
 writeAction :: IRCClient -> Action -> IO ()
-writeAction IRCClient {actions} = atomically . writeTBQueue actions
+writeAction IRCClient {actions = acts} = atomically . writeTBQueue acts
 
 readAction :: IRCClient -> IO Action
-readAction IRCClient {actions} = atomically $ readTBQueue actions
+readAction IRCClient {actions = acts} = atomically $ readTBQueue acts
 
 writeEvent :: IRCClient -> Event -> IO ()
-writeEvent IRCClient {events} = atomically . writeTBQueue events
+writeEvent IRCClient {events = evts} = atomically . writeTBQueue evts
 
 readEvent :: IRCClient -> IO Event
-readEvent IRCClient {events} = atomically $ readTBQueue events
+readEvent IRCClient {events = evts} = atomically $ readTBQueue evts
 
 initIRCState :: Socket -> SocketLogger -> IRCClient -> IO IRCState
-initIRCState socket logger client = do
+initIRCState sock logger cli = do
   thread <- async $ do
     result <- try $ concurrently_ sendLoop (receiveLoop "")
     case result of
-      Left err -> writeEvent client $ Disconnected $ show (err :: IOException)
+      Left err -> writeEvent cli $ Disconnected $ show (err :: IOException)
       Right _ -> pure ()
-  pure $ IRCState socket client thread
+  pure $ IRCState sock cli thread
   where
     sendMessage message = do
       let encodedMessage = encodeMessage message
-      sendAll socket $ encodeUtf8 encodedMessage
+      sendAll sock $ encodeUtf8 encodedMessage
       logOutgoing logger encodedMessage
 
     sendLoop = forever $ do
-      action <- readAction client
+      action <- readAction cli
       let messages = actionToMessages action
       forM_ messages sendMessage
     receiveLoop acc = do
-      bytes <- recv socket 4096
+      bytes <- recv sock 4096
       -- 0 bytes means the server has closed the connection (FIN).
       if BS.null bytes
         then throwIO $ userError "connection closed by server" -- IOException
@@ -78,9 +77,9 @@ initIRCState socket logger client = do
           forM_ rawMessages $ \msg -> do
             case decodeMessage msg of
               Nothing -> pure ()
-              Just (Message _ PING params) ->
-                sendMessage $ Message Nothing PONG params
-              Just message -> for_ (messageToEvent message) (writeEvent client)
+              Just (Message _ PING ps) ->
+                sendMessage $ Message Nothing PONG ps
+              Just message -> for_ (messageToEvent message) (writeEvent cli)
           receiveLoop remaining
 
 data IRCClientSettings = IRCClientSettings HostName ServiceName (Maybe FilePath)
@@ -93,10 +92,10 @@ withIRCClient (IRCClientSettings hostname port mLogFile) run =
     hints = defaultHints {addrSocketType = Stream}
     acquireSocket logger = do
       addr <- NE.head <$> getAddrInfo (Just hints) (Just hostname) (Just port)
-      socket <- openSocket addr
-      connect socket $ addrAddress addr
-      client <- IRCClient <$> newTBQueueIO 32 <*> newTBQueueIO 32
-      initIRCState socket logger client
-    releaseSocket (IRCState {connectionThread, socket}) = do
-      cancel connectionThread
-      close socket
+      sock <- openSocket addr
+      connect sock $ addrAddress addr
+      cli <- IRCClient <$> newTBQueueIO 32 <*> newTBQueueIO 32
+      initIRCState sock logger cli
+    releaseSocket IRCState {connectionThread = t, socket = s} = do
+      cancel t
+      close s
