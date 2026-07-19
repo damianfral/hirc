@@ -39,9 +39,9 @@ updateState :: Event -> AppState -> AppState
 updateState (Connected server _welcome) =
   appendServerMessage $ "Connected to " <> show server
 updateState (MessageReceived user (TargetChannel channel) msg) =
-  appendMessage (Just $ nickname user) msg channel
+  appendMessage msg channel (Just $ nickname user)
 updateState (NoticeReceived user (TargetChannel channel) msg) =
-  appendMessage Nothing ("[NOTICE] " <> nickOf user <> ": " <> msg) channel
+  appendMessage ("[NOTICE] " <> nickOf user <> ": " <> msg) channel Nothing
 updateState (UserJoined user channel) =
   let msg = "--> " <> nickOf user <> " joined"
    in modifyChannel channel $ \uiChannel@ChannelState {..} ->
@@ -50,7 +50,7 @@ updateState (UserJoined user channel) =
             channelNicknames = Set.insert (nickname user) channelNicknames
           }
 updateState (UserLeft user channel _reason) =
-  appendMessage Nothing ("<-- " <> nickOf user <> " left") channel
+  appendMessage ("<-- " <> nickOf user <> " left") channel Nothing
     . removeNicknameFromChannel (nickname user) channel
 updateState (NickChanged user n@(Nickname nick)) =
   appendServerMessage (nickOf user <> " is now known as " <> nick)
@@ -63,9 +63,9 @@ updateState (ChannelListEntry channel count topic) =
   let msg =
         unwords
           ["[LIST]", channelToText channel, "(" <> show count, " users)", topic]
-   in appendMessage Nothing msg channel
+   in appendMessage msg channel Nothing
 updateState (TopicReceived channel topic) =
-  appendMessage Nothing ("Topic: " <> topic) channel
+  appendMessage ("Topic: " <> topic) channel Nothing
 updateState (Disconnected reason) =
   appendServerMessage $ "Disconnected: " <> reason
 updateState _ = id
@@ -77,12 +77,12 @@ modifyChannel ::
 modifyChannel channel update st =
   st {appChannels = Map.adjust update channel (appChannels st)}
 
-appendMessage :: Maybe Nickname -> Text -> Channel -> AppState -> AppState
-appendMessage Nothing msg channel =
+appendMessage :: Text -> Channel -> Maybe Nickname -> AppState -> AppState
+appendMessage msg channel Nothing =
   modifyChannel channel $ \uiChannel ->
     uiChannel {channelMessages = channelMessages uiChannel <> [msg]}
-appendMessage (Just (Nickname nick)) msg channel =
-  appendMessage Nothing (nick <> ": " <> msg) channel
+appendMessage msg channel (Just (Nickname nick)) =
+  appendMessage (nick <> ": " <> msg) channel Nothing
 
 appendServerMessage :: Text -> AppState -> AppState
 appendServerMessage msg st = st {appHostMessages = appHostMessages st <> [msg]}

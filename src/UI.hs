@@ -220,21 +220,25 @@ handleSendMessage text = do
       liftIO $ writeAction (appClient st) $ SendMessage target text
 
 handleHelp :: EventM ViewportName AppState ()
-handleHelp =
-  modify
-    $ appendServerMessage
-    $ T.unlines
-      [ "Available commands:",
-        "  /help            - Show this help message",
-        "  /join #channel   - Join a channel",
-        "  /part            - Leave the current channel",
-        "  /names           - List members in the current channel",
-        "  /list            - List available channels",
-        "  /nick <nickname> - Change your nickname",
-        "  /topic [#channel] <topic> - View or set the channel topic",
-        "  /away [reason]   - Set yourself as away",
-        "  /quit [reason]   - Quit the application"
-      ]
+handleHelp = do
+  st <- get
+  modify $ case appCurrentChannel st of
+    Nothing -> appendServerMessage helpMsg
+    Just channel -> appendMessage helpMsg channel Nothing
+  where
+    helpMsg =
+      T.unlines
+        [ "Available commands:",
+          "  /help            - Show this help message",
+          "  /join #channel   - Join a channel",
+          "  /part            - Leave the current channel",
+          "  /names           - List members in the current channel",
+          "  /list            - List available channels",
+          "  /nick <nickname> - Change your nickname",
+          "  /topic [#channel] <topic> - View or set the channel topic",
+          "  /away [reason]   - Set yourself as away",
+          "  /quit [reason]   - Quit the application"
+        ]
 
 handleNick :: Text -> EventM ViewportName AppState ()
 handleNick msg = case T.words msg of
