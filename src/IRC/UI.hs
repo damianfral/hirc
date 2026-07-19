@@ -174,17 +174,17 @@ handleEnter = do
   let content = T.intercalate "\n" $ T.strip <$> getEditContents appInput
   case content of
     "" -> pure ()
+    "/help" -> handleHelp
+    "/part" -> handleLeave
+    "/names" -> handleNames
+    "/list" -> handleList
     msg
-      | "/help" `T.isPrefixOf` msg -> handleHelp
       | "/join" `T.isPrefixOf` msg -> handleJoin msg
-      | "/part" `T.isPrefixOf` msg -> handleLeave
-      | "/names" `T.isPrefixOf` msg -> handleNames
-      | "/list" `T.isPrefixOf` msg -> handleList
       | "/nick" `T.isPrefixOf` msg -> handleNick msg
       | "/away" `T.isPrefixOf` msg -> handleAway msg
       | "/topic" `T.isPrefixOf` msg -> handleTopic msg
       | "/quit" `T.isPrefixOf` msg -> handleQuit msg
-      | otherwise -> handleSend msg
+      | otherwise -> handleSendMessage msg
 
   modify resetUserInput
 
@@ -194,16 +194,10 @@ handleJoin msg = case T.words msg of
     let channel = Channel (T.dropWhile (== '#') ch)
     st <- get
     liftIO $ writeAction (appClient st) $ JoinChannel channel
-    let newChannelState =
-          ChannelState
-            { channelMessages = mempty,
-              channelNicknames = mempty
-            }
+    let newChannelState = ChannelState mempty mempty
     modify $ \st' ->
-      st'
-        { appChannels = Map.insert channel newChannelState (appChannels st'),
-          appCurrentChannel = Just channel
-        }
+      let newChannels = Map.insert channel newChannelState (appChannels st')
+       in st' {appChannels = newChannels, appCurrentChannel = Just channel}
   _ -> pure ()
 
 handleLeave :: EventM ViewportName AppState ()
@@ -213,16 +207,10 @@ handleLeave = do
     Nothing -> pure ()
     Just channel -> do
       liftIO $ writeAction (appClient st) $ LeaveChannel channel Nothing
-      let newChannelState =
-            ChannelState
-              { channelMessages = mempty,
-                channelNicknames = mempty
-              }
+      let newChannelState = ChannelState mempty mempty
       modify $ \st' ->
-        st'
-          { appChannels = Map.insert channel newChannelState (appChannels st'),
-            appCurrentChannel = Nothing
-          }
+        let newChannels = Map.insert channel newChannelState (appChannels st')
+         in st' {appChannels = newChannels, appCurrentChannel = Nothing}
 
 handleList :: EventM ViewportName AppState ()
 handleList = get >>= \st -> liftIO $ writeAction (appClient st) ListChannels
@@ -243,9 +231,9 @@ handleQuit msg = do
   liftIO $ writeAction appClient (Quit reason)
   halt
 
-handleSend :: Text -> EventM ViewportName AppState ()
-handleSend "" = pure ()
-handleSend text = do
+handleSendMessage :: Text -> EventM ViewportName AppState ()
+handleSendMessage "" = pure ()
+handleSendMessage text = do
   st <- get
   case appCurrentChannel st of
     Nothing -> pure ()
@@ -287,18 +275,24 @@ handleAway msg = do
 
 handleTopic :: Text -> EventM ViewportName AppState ()
 handleTopic msg = do
-  st <- get
-  case T.words msg of
-    [_cmd, ch, t] -> do
-      let channel = Channel (T.dropWhile (== '#') ch)
-      liftIO $ writeAction (appClient st) $ Topic channel (Just t)
-    [_cmd, t] -> case appCurrentChannel st of
-      Nothing -> modify $ appendServerMessage "Usage: /topic [#channel] <topic>"
-      Just channel -> liftIO $ writeAction (appClient st) $ Topic channel (Just t)
-    [_cmd] -> case appCurrentChannel st of
-      Nothing -> modify $ appendServerMessage "Usage: /topic [#channel] <topic>"
-      Just channel -> liftIO $ writeAction (appClient st) $ Topic channel Nothing
-    _ -> modify $ appendServerMessage "Usage: /topic [#channel] <topic>"
+  AppState {..} <- get
+  let mAction =
+        case T.words msg of
+          [_cmd, ch, t] ->
+            let channel = Channel (T.dropWhile (== '#') ch)
+             in Just $ Topic channel (Just t)
+          [_cmd, t] -> case appCurrentChannel of
+            Nothing -> Nothing
+            Just channel -> Just $ Topic channel (Just t)
+          [_cmd] -> case appCurrentChannel of
+            Nothing -> Nothing
+            Just channel -> Just $ Topic channel Nothing
+          _ -> Nothing
+  case mAction of
+    Nothing -> modify $ appendServerMessage "Usage: /topic [#channel] <topic>"
+    Just action -> liftIO $ writeAction appClient action
+
+--------------------------------------------------------------------------------
 
 updateState :: Event -> AppState -> AppState
 updateState (Connected server _welcome) =
@@ -327,7 +321,7 @@ updateState (ChannelUsers channel nicks) = addNicknamesToChannel nicks channel
 updateState (ChannelListEntry channel count topic) =
   let msg =
         unwords
-          ["[LIST]", channelToText channel, "(" <> show count <> " users)", topic]
+          ["[LIST]", channelToText channel, "(" <> show count, " users)", topic]
    in appendMessage Nothing msg channel
 updateState (TopicReceived channel topic) =
   appendMessage Nothing ("Topic: " <> topic) channel
@@ -350,16 +344,16 @@ appendMessage (Just (Nickname nick)) msg channel =
   appendMessage Nothing (nick <> ": " <> msg) channel
 
 appendServerMessage :: Text -> AppState -> AppState
-appendServerMessage msg st =
-  st {appHostMessages = appHostMessages st <> [msg]}
+appendServerMessage msg st = st {appHostMessages = appHostMessages st <> [msg]}
 
 addNicknamesToChannel :: Set Nickname -> Channel -> AppState -> AppState
 addNicknamesToChannel users channel = modifyChannel channel $ \uiChannel ->
   uiChannel {channelNicknames = users <> channelNicknames uiChannel}
 
 removeNicknameFromChannel :: Nickname -> Channel -> AppState -> AppState
-removeNicknameFromChannel user channel = modifyChannel channel $ \uiChannel@ChannelState {..} ->
-  uiChannel {channelNicknames = Set.delete user channelNicknames}
+removeNicknameFromChannel user channel =
+  modifyChannel channel $ \uiChannel@ChannelState {..} ->
+    uiChannel {channelNicknames = Set.delete user channelNicknames}
 
 removeNicknameFromAllChannels :: Nickname -> AppState -> AppState
 removeNicknameFromAllChannels nick = modifyAllChannels $ \uiChannel ->
@@ -369,11 +363,9 @@ modifyAllChannels :: (ChannelState -> ChannelState) -> AppState -> AppState
 modifyAllChannels update st = st {appChannels = update <$> appChannels st}
 
 modifyUserNick :: Nickname -> Nickname -> AppState -> AppState
-modifyUserNick oldNick newNick = modifyAllChannels $ \uiChannel ->
-  uiChannel
-    { channelNicknames =
-        Set.delete oldNick $ Set.insert newNick $ channelNicknames uiChannel
-    }
+modifyUserNick old new = modifyAllChannels $ \uiChannel ->
+  let newNicks = Set.delete old $ Set.insert new $ channelNicknames uiChannel
+   in uiChannel {channelNicknames = newNicks}
 
 --------------------------------------------------------------------------------
 
