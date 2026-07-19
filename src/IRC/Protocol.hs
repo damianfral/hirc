@@ -265,7 +265,7 @@ decodePrefix t
 -- >>> parseParams "#haskell :Hello, world!"
 -- Params ["#haskell","Hello, world!"]
 --
--- > parseParams ""
+-- >>> parseParams ""
 -- >   -- Params []
 parseParams :: Text -> Params
 parseParams t = Params $ case break (":" `T.isPrefixOf`) (T.words t) of

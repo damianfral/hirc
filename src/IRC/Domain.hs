@@ -117,7 +117,7 @@ messageToEvent (Message (Just (PrefixUser u)) NOTICE (Params (target : msg))) =
 messageToEvent (Message (Just (PrefixUser u)) NICK (Params [newNick])) =
   Just $ NickChanged u (Nickname newNick)
 messageToEvent (Message (Just (PrefixUser u)) QUIT (Params (reason : _))) =
-  Just $ UserDisconnected u (Reason <$> Just reason)
+  Just $ UserDisconnected u (Just $ Reason reason)
 messageToEvent
   (Message (Just (PrefixServer _)) (Numeric 353) (Params (_ : _ : ch : us))) =
     Just $ ChannelUsers (textToChannel ch) (parseNames $ T.unwords us)

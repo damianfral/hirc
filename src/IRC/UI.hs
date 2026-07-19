@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
 module IRC.UI (runUI) where
@@ -11,7 +10,6 @@ import Brick.BChan (BChan, newBChan, writeBChan)
 import Brick.Widgets.Border (border, borderWithLabel)
 import Brick.Widgets.Edit (Editor, editorText, getEditContents, handleEditorEvent, renderEditor)
 import Control.Concurrent.Async (async, cancel)
-import Data.Map (lookup)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -144,11 +142,11 @@ viewUI AppState {..} = [vBox [mainWidget, chatBar]]
     currentChannelMessages = case appCurrentChannel of
       Nothing -> Just appHostMessages
       Just chanName -> do
-        uiChann <- lookup chanName appChannels
+        uiChann <- Map.lookup chanName appChannels
         pure $ channelMessages uiChann
     currentChannelNicknames = do
       chanName <- appCurrentChannel
-      uiChann <- lookup chanName appChannels
+      uiChann <- Map.lookup chanName appChannels
       pure $ channelNicknames uiChann
     chatBar = vLimit 3 $ border $ hBox [str "> ", inputWidget]
     inputWidget = renderEditor viewEditorLines True appInput

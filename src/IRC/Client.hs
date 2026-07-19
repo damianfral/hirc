@@ -1,6 +1,5 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
 module IRC.Client
@@ -52,7 +51,7 @@ initIRCState socket client mLogHandle = do
   thread <- async $ do
     result <- try $ concurrently_ sendLoop (receiveLoop "")
     case result of
-      Left (err :: IOException) -> writeEvent client $ Disconnected $ show err
+      Left err -> writeEvent client $ Disconnected $ show (err :: IOException)
       Right _ -> pure ()
   pure $ IRCState socket client thread
   where
