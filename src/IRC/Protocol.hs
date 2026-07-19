@@ -12,7 +12,6 @@ module IRC.Protocol where
 import Data.GenValidity
 import Data.GenValidity.Text ()
 import Data.List (unsnoc)
-import qualified Data.List as L
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
 import Relude hiding (atomically)
@@ -283,8 +282,9 @@ instance Validity Params where
       allV = mconcat $ do
         p <- params
         [checkNoLinebreak p "Param contains carriage return"]
+      dropLast = reverse . drop 1 . reverse
       middleV = mconcat $ do
-        x <- L.init params
+        x <- dropLast params
         [ check (not (":" `T.isPrefixOf` x)) "Middle param starts with ':'",
           checkNoSpaces x "Middle param contains whitespace",
           checkNotNull x "Middle param is empty"
