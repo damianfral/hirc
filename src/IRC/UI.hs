@@ -189,11 +189,6 @@ handleEnter = do
       | otherwise -> handleSend msg
 
   modify resetUserInput
-  case appCurrentChannel of
-    Nothing -> pure ()
-    Just channel -> do
-      let msg = MessageReceived appUser (TargetChannel channel) content
-      handleEvent $ AppEvent msg
 
 handleJoin :: Text -> EventM ViewportName AppState ()
 handleJoin msg = case T.words msg of
