@@ -177,10 +177,14 @@ handleEnter = do
   case content of
     "" -> pure ()
     msg
+      | "/help" `T.isPrefixOf` msg -> handleHelp
       | "/join" `T.isPrefixOf` msg -> handleJoin msg
       | "/part" `T.isPrefixOf` msg -> handleLeave
       | "/names" `T.isPrefixOf` msg -> handleNames
       | "/list" `T.isPrefixOf` msg -> handleList
+      | "/nick" `T.isPrefixOf` msg -> handleNick msg
+      | "/away" `T.isPrefixOf` msg -> handleAway msg
+      | "/topic" `T.isPrefixOf` msg -> handleTopic msg
       | "/quit" `T.isPrefixOf` msg -> handleQuit msg
       | otherwise -> handleSend msg
 
@@ -256,6 +260,53 @@ handleSend text = do
       let target = TargetChannel channel
       liftIO $ writeAction (appClient st) $ SendMessage target text
 
+handleHelp :: EventM ViewportName AppState ()
+handleHelp =
+  modify
+    $ appendServerMessage
+    $ T.unlines
+      [ "Available commands:",
+        "  /help            - Show this help message",
+        "  /join #channel   - Join a channel",
+        "  /part            - Leave the current channel",
+        "  /names           - List members in the current channel",
+        "  /list            - List available channels",
+        "  /nick <nickname> - Change your nickname",
+        "  /topic [#channel] <topic> - View or set the channel topic",
+        "  /away [reason]   - Set yourself as away",
+        "  /quit [reason]   - Quit the application"
+      ]
+
+handleNick :: Text -> EventM ViewportName AppState ()
+handleNick msg = case T.words msg of
+  [_cmd, nick] -> do
+    st <- get
+    liftIO $ writeAction (appClient st) $ SetNickname (Nickname nick)
+  _ -> modify $ appendServerMessage "Usage: /nick <nickname>"
+
+handleAway :: Text -> EventM ViewportName AppState ()
+handleAway msg = do
+  let reason = case T.words msg of
+        [_cmd, r] -> Just (Reason r)
+        _ -> Nothing
+  st <- get
+  liftIO $ writeAction (appClient st) $ SetAway reason
+
+handleTopic :: Text -> EventM ViewportName AppState ()
+handleTopic msg = do
+  st <- get
+  case T.words msg of
+    [_cmd, ch, t] -> do
+      let channel = Channel (T.dropWhile (== '#') ch)
+      liftIO $ writeAction (appClient st) $ Topic channel (Just t)
+    [_cmd, t] -> case appCurrentChannel st of
+      Nothing -> modify $ appendServerMessage "Usage: /topic [#channel] <topic>"
+      Just channel -> liftIO $ writeAction (appClient st) $ Topic channel (Just t)
+    [_cmd] -> case appCurrentChannel st of
+      Nothing -> modify $ appendServerMessage "Usage: /topic [#channel] <topic>"
+      Just channel -> liftIO $ writeAction (appClient st) $ Topic channel Nothing
+    _ -> modify $ appendServerMessage "Usage: /topic [#channel] <topic>"
+
 updateState :: Event -> AppState -> AppState
 updateState (Connected server _welcome) =
   appendServerMessage $ "Connected to " <> show server
@@ -285,6 +336,8 @@ updateState (ChannelListEntry channel count topic) =
         unwords
           ["[LIST]", channelToText channel, "(" <> show count <> " users)", topic]
    in appendMessage Nothing msg channel
+updateState (TopicReceived channel topic) =
+  appendMessage Nothing ("Topic: " <> topic) channel
 updateState (Disconnected reason) =
   appendServerMessage $ "Disconnected: " <> reason
 updateState _ = id

@@ -62,6 +62,8 @@ data Command
   | QUIT
   | LIST
   | NAMES
+  | AWAY
+  | TOPIC
   | Numeric Int
   deriving (Show, Eq, Generic)
 
@@ -216,6 +218,8 @@ parseCommand t = case t of
   "QUIT" -> Just QUIT
   "LIST" -> Just LIST
   "NAMES" -> Just NAMES
+  "AWAY" -> Just AWAY
+  "TOPIC" -> Just TOPIC
   _ -> case TR.decimal t of
     Right (n, _) -> Just (Numeric n)
     _ -> Nothing

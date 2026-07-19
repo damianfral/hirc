@@ -22,6 +22,9 @@ data Action
   | Shutdown (Maybe Reason)
   | ListChannels
   | ListMembers Channel
+  | SetNickname Nickname
+  | SetAway (Maybe Reason)
+  | Topic Channel (Maybe Text)
   deriving (Show, Eq)
 
 newtype Realname = Realname Text
@@ -48,6 +51,7 @@ data Event
   | ChannelUsers Channel (Set Nickname)
   | ChannelListEntry Channel Int Text
   | Disconnected Text
+  | TopicReceived Channel Text
   deriving (Show, Eq)
 
 actionToMessages :: Action -> [Message]
@@ -77,6 +81,15 @@ actionToMessages (Shutdown reason) =
 actionToMessages ListChannels = [Message Nothing LIST mempty]
 actionToMessages (ListMembers channel) =
   [Message Nothing NAMES $ Params [channelToText channel]]
+actionToMessages (SetNickname (Nickname nick)) =
+  [Message Nothing NICK $ Params [nick]]
+actionToMessages (SetAway mReason) =
+  [Message Nothing AWAY $ maybeReasonToParams mReason]
+actionToMessages (Topic channel mTopic) =
+  let p = case mTopic of
+        Nothing -> Params [channelToText channel]
+        Just topic -> Params [channelToText channel, topic]
+   in [Message Nothing TOPIC p]
 
 targetToParams :: Target -> Params
 targetToParams target = Params $ case target of
@@ -114,6 +127,9 @@ messageToEvent
       Right (n, _) ->
         Just $ ChannelListEntry (textToChannel ch) n (T.unwords topic)
       Left _ -> Nothing
+messageToEvent
+  (Message (Just (PrefixServer _)) (Numeric 332) (Params (_ : ch : topic))) =
+    Just $ TopicReceived (textToChannel ch) (T.unwords topic)
 messageToEvent _ = Nothing
 
 parseNames :: Text -> Set Nickname
