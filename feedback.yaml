@@ -1,0 +1,6 @@
+loops:
+   default:
+     command: |
+       set -e
+       hpack 
+       cabal test
