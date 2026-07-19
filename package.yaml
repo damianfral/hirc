@@ -35,7 +35,7 @@ library:
     - genvalidity
     - genvalidity-text
     - network
-    - optparse-generic
+    - optparse-applicative
     - QuickCheck
     - relude
     - stm
