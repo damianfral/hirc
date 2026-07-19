@@ -22,7 +22,8 @@ data Options w = Options
     username :: w ::: Text,
     realname :: w ::: Text,
     host :: w ::: String <!> "irc.libera.chat" <?> "IRC server hostname",
-    port :: w ::: String <!> "6667" <?> "IRC server port"
+    port :: w ::: String <!> "6667" <?> "IRC server port",
+    logFile :: w ::: Maybe FilePath <?> "Write logs to this file"
   }
   deriving (Generic)
 
@@ -38,7 +39,7 @@ runCLI = do
 
 runCLIOptions :: Options Unwrapped -> IO ()
 runCLIOptions Options {..} =
-  withIRCClient host port $ \client -> do
+  withIRCClient host port logFile $ \client -> do
     writeAction client
       $ Register (Nickname nickname) (Username username) (Realname realname)
     runUI host client $ User (Nickname nickname) Nothing Nothing

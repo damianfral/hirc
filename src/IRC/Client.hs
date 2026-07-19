@@ -19,6 +19,7 @@ import Control.Exception (IOException, bracket, throwIO, try)
 import qualified Data.ByteString as BS
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
+import Data.Text.IO.Utf8 (hPutStrLn)
 import IRC.Domain
 import IRC.Protocol
 import Network.Socket (AddrInfo (..), HostName, ServiceName, Socket, SocketType (..), close, connect, defaultHints, getAddrInfo, openSocket)
@@ -46,8 +47,8 @@ writeEvent IRCClient {events} = atomically . writeTBQueue events
 readEvent :: IRCClient -> IO Event
 readEvent IRCClient {events} = atomically $ readTBQueue events
 
-initIRCState :: Socket -> IRCClient -> IO IRCState
-initIRCState socket client = do
+initIRCState :: Socket -> IRCClient -> Maybe Handle -> IO IRCState
+initIRCState socket client mLogHandle = do
   thread <- async $ do
     result <- try $ concurrently_ sendLoop (receiveLoop "")
     case result of
@@ -55,7 +56,15 @@ initIRCState socket client = do
       Right _ -> pure ()
   pure $ IRCState socket client thread
   where
-    sendMessage message = sendAll socket $ encodeUtf8 $ encodeMessage message
+    sendMessage message = do
+      let encodedMessage = encodeMessage message
+      sendAll socket $ encodeUtf8 encodedMessage
+      case mLogHandle of
+        Nothing -> pure ()
+        Just logHandle ->
+          hPutStrLn logHandle
+            $ unlines [T.replicate 80 "-", "Outgoing:", "", encodedMessage]
+
     sendLoop = forever $ do
       action <- readAction client
       let messages = actionToMessages action
@@ -69,6 +78,11 @@ initIRCState socket client = do
           let text = acc <> decodeUtf8With lenientDecode bytes
           let (raw, remaining) = T.breakOnEnd "\r\n" text
           let rawMessages = T.splitOn "\r\n" raw
+          case mLogHandle of
+            Nothing -> pure ()
+            Just logHandle ->
+              hPutStrLn logHandle
+                $ unlines ([T.replicate 80 "-", "Incomming:", ""] <> rawMessages)
           forM_ rawMessages $ \msg -> do
             case decodeMessage msg of
               Nothing -> pure ()
@@ -77,16 +91,20 @@ initIRCState socket client = do
               Just message -> for_ (messageToEvent message) (writeEvent client)
           receiveLoop remaining
 
-withIRCClient :: HostName -> ServiceName -> (IRCClient -> IO a) -> IO a
-withIRCClient hostname port run = bracket adquire release $ run . client
+withIRCClient :: HostName -> ServiceName -> Maybe FilePath -> (IRCClient -> IO a) -> IO a
+withIRCClient hostname port mLogFile run = case mLogFile of
+  Nothing -> bracket (adquireSocket Nothing) releaseSocket $ run . client
+  Just logFile -> withFile logFile AppendMode $ \logHandle -> do
+    hSetBuffering logHandle LineBuffering
+    bracket (adquireSocket $ Just logHandle) releaseSocket $ run . client
   where
     hints = defaultHints {addrSocketType = Stream}
-    adquire = do
+    adquireSocket mLogHandle = do
       addr <- NE.head <$> getAddrInfo (Just hints) (Just hostname) (Just port)
       socket <- openSocket addr
       connect socket $ addrAddress addr
       client <- IRCClient <$> newTBQueueIO 32 <*> newTBQueueIO 32
-      initIRCState socket client
-    release (IRCState {connectionThread, socket}) = do
+      initIRCState socket client mLogHandle
+    releaseSocket (IRCState {connectionThread, socket}) = do
       cancel connectionThread
       close socket
