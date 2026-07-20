@@ -14,11 +14,11 @@ import IRC.Protocol
 import Relude
 
 data ViewportName
-  = ChatViewport
-  | ChatInput
-  | Scrollable ClickableScrollbarElement ViewportName
-  | ChatMembers
+  = Messages
+  | Input
+  | ChannelMembers
   | Channels
+  | Scrollable ClickableScrollbarElement ViewportName
   deriving (Show, Ord, Eq)
 
 data ChannelState = ChannelState

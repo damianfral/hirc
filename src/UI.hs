@@ -28,7 +28,7 @@ uiApp :: App AppState Event ViewportName
 uiApp =
   App
     { appDraw = viewUI,
-      appChooseCursor = const $ showCursorNamed ChatInput,
+      appChooseCursor = const $ showCursorNamed Input,
       appHandleEvent = handleEvent,
       appStartEvent = pure (),
       appAttrMap = const $ A.attrMap V.defAttr attributes
@@ -40,9 +40,9 @@ handleEvent :: BrickEvent ViewportName Event -> EventM ViewportName AppState ()
 handleEvent (VtyEvent (V.EvKey V.KEsc [])) = haltWithQuit
 handleEvent (VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl])) = haltWithQuit
 handleEvent (VtyEvent (V.EvKey V.KPageUp [])) =
-  vScrollPage (viewportScroll ChatViewport) Brick.Up
+  vScrollPage (viewportScroll Messages) Brick.Up
 handleEvent (VtyEvent (V.EvKey V.KPageDown [])) =
-  vScrollPage (viewportScroll ChatViewport) Brick.Down
+  vScrollPage (viewportScroll Messages) Brick.Down
 handleEvent (VtyEvent (V.EvKey V.KEnter [])) = handleEnter
 handleEvent ev@(VtyEvent _) = do
   st <- get
@@ -50,7 +50,7 @@ handleEvent ev@(VtyEvent _) = do
   put $ st {appInput = newEditor}
 handleEvent (AppEvent event) = do
   modify $ updateState event
-  vScrollToEnd $ viewportScroll ChatViewport
+  vScrollToEnd $ viewportScroll Messages
 handleEvent (MouseDown (Scrollable _element vp) V.BScrollUp _mods _location) =
   vScrollBy (viewportScroll vp) (-3)
 handleEvent (MouseDown (Scrollable _element vp) V.BScrollDown _mods _location) =
@@ -88,7 +88,7 @@ runUI hostname client user = do
         }
 
 emptyEditor :: Editor Text ViewportName
-emptyEditor = editorText ChatInput Nothing ""
+emptyEditor = editorText Input Nothing ""
 
 resetUserInput :: AppState -> AppState
 resetUserInput st = st {appInput = emptyEditor}
@@ -114,7 +114,7 @@ viewChannelName = txt . channelToText
 
 viewMessages :: [Text] -> Widget ViewportName
 viewMessages msgs = withClickableVScrollBars Scrollable $ do
-  withVScrollBars OnRight $ viewport ChatViewport Vertical $ vBox $ txt <$> msgs
+  withVScrollBars OnRight $ viewport Messages Vertical $ vBox $ txt <$> msgs
 
 viewUI :: AppState -> [Widget ViewportName]
 viewUI AppState {..} = [vBox [mainWidget, chatBar]]
@@ -141,7 +141,7 @@ viewUI AppState {..} = [vBox [mainWidget, chatBar]]
               $ borderWithLabel (txt " members ")
               $ withClickableVScrollBars Scrollable
               $ withVScrollBars OnRight
-              $ viewport ChatMembers Vertical
+              $ viewport ChannelMembers Vertical
               $ viewMembers
               $ fromMaybe mempty currentChannelNicknames
           ]
