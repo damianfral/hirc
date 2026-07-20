@@ -109,6 +109,30 @@ modifyUserNick old new = modifyAllChannels $ \uiChannel ->
   let newNicks = Set.delete old $ Set.insert new $ channelNicknames uiChannel
    in uiChannel {channelNicknames = newNicks}
 
+goToNextChannel :: AppState -> AppState
+goToNextChannel st = fromMaybe st $ do
+  channel <- appCurrentChannel st
+  Just $ st {appCurrentChannel = Just $ nextChannel channel (appChannels st)}
+
+goToPrevChannel :: AppState -> AppState
+goToPrevChannel st = fromMaybe st $ do
+  channel <- appCurrentChannel st
+  Just $ st {appCurrentChannel = Just $ prevChannel channel (appChannels st)}
+
+nextChannel :: Channel -> Map Channel ChannelState -> Channel
+nextChannel currentChannel channels =
+  Map.keysSet channels & \set ->
+    fromMaybe currentChannel $ do
+      i <- Set.lookupIndex currentChannel set
+      listToMaybe $ drop (i + 1) $ toList set
+
+prevChannel :: Channel -> Map Channel ChannelState -> Channel
+prevChannel currentChannel channels =
+  Map.keysSet channels & \set ->
+    fromMaybe currentChannel $ do
+      i <- Set.lookupIndex currentChannel set
+      listToMaybe $ drop (i - 1) $ toList set
+
 --------------------------------------------------------------------------------
 
 nickOf :: User -> Text

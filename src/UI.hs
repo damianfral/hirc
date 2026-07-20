@@ -43,6 +43,12 @@ handleEvent (VtyEvent (V.EvKey V.KPageUp [])) =
   vScrollPage (viewportScroll Messages) Brick.Up
 handleEvent (VtyEvent (V.EvKey V.KPageDown [])) =
   vScrollPage (viewportScroll Messages) Brick.Down
+handleEvent (VtyEvent (V.EvKey V.KDown [])) = handleNextChannel
+handleEvent (VtyEvent (V.EvKey V.KUp [])) = handlePrevChannel
+handleEvent (VtyEvent (V.EvKey (V.KChar 'n') [V.MCtrl])) = handleNextChannel
+handleEvent (VtyEvent (V.EvKey (V.KChar 'p') [V.MCtrl])) = handlePrevChannel
+handleEvent (VtyEvent (V.EvKey (V.KChar 'j') [V.MCtrl])) = handleNextChannel
+handleEvent (VtyEvent (V.EvKey (V.KChar 'k') [V.MCtrl])) = handlePrevChannel
 handleEvent (VtyEvent (V.EvKey V.KEnter [])) = handleEnter
 handleEvent ev@(VtyEvent _) = do
   st <- get
@@ -193,6 +199,12 @@ handleEnter = do
       | otherwise -> handleSendMessage msg
 
   modify resetUserInput
+
+handleNextChannel :: EventM ViewportName AppState ()
+handleNextChannel = modify goToNextChannel
+
+handlePrevChannel :: EventM ViewportName AppState ()
+handlePrevChannel = modify goToPrevChannel
 
 handleJoin :: Text -> EventM ViewportName AppState ()
 handleJoin msg = case T.words msg of
