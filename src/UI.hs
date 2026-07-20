@@ -63,17 +63,12 @@ handleEvent ev@(VtyEvent _) = do
 handleEvent (AppEvent event) = do
   modify $ updateState event
   vScrollToEnd $ viewportScroll Messages
-handleEvent (MouseDown (Scrollable _element vp) V.BScrollUp _mods _location) =
-  vScrollBy (viewportScroll vp) (-3)
-handleEvent (MouseDown (Scrollable _element vp) V.BScrollDown _mods _location) =
-  vScrollBy (viewportScroll vp) 3
-handleEvent (MouseDown (Scrollable element vp) _button _mods _location) =
-  case element of
-    SBHandleBefore -> vScrollBy (viewportScroll vp) (-1)
-    SBHandleAfter -> vScrollBy (viewportScroll vp) 1
-    SBTroughBefore -> vScrollPage (viewportScroll vp) Brick.Up
-    SBTroughAfter -> vScrollPage (viewportScroll vp) Brick.Down
-    SBBar -> pure ()
+handleEvent (MouseDown (Scrollable _element vp) direction _mods _location) = do
+  let scrollLines = case direction of
+        V.BScrollUp -> (-3)
+        V.BScrollDown -> 3
+        _ -> 0
+  vScrollBy (viewportScroll vp) scrollLines
 handleEvent _ = pure ()
 
 runUI :: HostName -> IRCClient -> User -> IO ()
@@ -106,17 +101,15 @@ resetUserInput :: AppState -> AppState
 resetUserInput st = st {appInput = emptyEditor}
 
 viewChannels :: Map Channel ChannelState -> Maybe Channel -> Widget ViewportName
-viewChannels chans current =
-  if Map.null chans
-    then txt "  No channels"
-    else
-      vBox
-        [ let isSelected = Just k == current
-              label = "  " <> channelToText k
-              w = txt label
-           in if isSelected then withAttr channelSelectedAttr w else w
-        | (k, _v) <- Map.toList chans
-        ]
+viewChannels chans current = vBox $ if Map.null chans then [] else names
+  where
+    names =
+      [ let isSelected = Just k == current
+            name = "  " <> channelToText k
+            w = txt name
+         in if isSelected then withAttr channelSelectedAttr w else w
+      | (k, _v) <- Map.toList chans
+      ]
 
 viewMembers :: Set Nickname -> Widget ViewportName
 viewMembers nicks = vBox $ txt . unNickname <$> toList nicks
@@ -154,7 +147,8 @@ viewUI AppState {..} = [vBox [mainWidget, chatBar]]
       Nothing ->
         hBox
           [ channelListWidget,
-            borderWithLabel (txt $ " " <> appHost <> " ") $ viewChatMessages appHostMessages
+            borderWithLabel (txt $ " " <> appHost <> " ")
+              $ viewChatMessages appHostMessages
           ]
       Just channel ->
         hBox
@@ -287,11 +281,10 @@ handleSendMessage text = do
 handleHelp :: EventM ViewportName AppState ()
 handleHelp = do
   st <- get
+  let chatMsg = ChatMessage Nothing helpMsg Dimmed
   modify $ case appCurrentChannel st of
     Nothing -> appendServerChatMessage $ ChatMessage Nothing helpMsg Dimmed
-    Just channel ->
-      let chatMsg = ChatMessage Nothing helpMsg Dimmed
-       in appendChatMessage chatMsg channel
+    Just channel -> appendChatMessage chatMsg channel
   where
     helpMsg =
       [ "Available commands:",

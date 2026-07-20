@@ -22,20 +22,17 @@ data Options = Options
     logFile :: Maybe FilePath
   }
 
+textOpt :: String -> String -> Parser Text
+textOpt l h = strOption $ long l <> help h <> metavar "TEXT"
+
 nicknameParser :: Parser Nickname
-nicknameParser = strOption mods <&> Nickname . fromString
-  where
-    mods = long "nickname" <> help "Nickname" <> metavar "TEXT"
+nicknameParser = Nickname <$> textOpt "nickname" "Nickname"
 
 usernameParser :: Parser Username
-usernameParser = strOption mods <&> Username . fromString
-  where
-    mods = long "username" <> help "Username" <> metavar "TEXT"
+usernameParser = Username <$> textOpt "username" "Username"
 
 realnameParser :: Parser Realname
-realnameParser = strOption mods <&> Realname . fromString
-  where
-    mods = long "realname" <> help "Realname" <> metavar "TEXT"
+realnameParser = Realname <$> textOpt "realname" "Realname"
 
 hostParser :: Parser HostName
 hostParser =
@@ -56,9 +53,8 @@ portParser =
     <> showDefault
 
 logFileParser :: Parser (Maybe FilePath)
-logFileParser = optional $ strOption mods
-  where
-    mods = long "log-file" <> help "Write logs to this file" <> metavar "FILE"
+logFileParser = optional $ strOption $ do
+  long "log-file" <> help "Write logs to this file" <> metavar "FILE"
 
 optionsParser :: Parser Options
 optionsParser =

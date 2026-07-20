@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
 module UI.AppState where
@@ -35,6 +34,13 @@ data ChannelState = ChannelState
     channelNicknames :: Set Nickname
   }
 
+appendChannelMessages :: [ChatMessage] -> ChannelState -> ChannelState
+appendChannelMessages msgs st = st {channelMessages = channelMessages st <> msgs}
+
+modifyChannelNicknames ::
+  (Set Nickname -> Set Nickname) -> ChannelState -> ChannelState
+modifyChannelNicknames f st = st {channelNicknames = f (channelNicknames st)}
+
 data AppState = AppState
   { appClient :: IRCClient,
     appUser :: User,
@@ -56,47 +62,43 @@ updateState (NoticeReceived user (TargetChannel channel) msg) =
   where
     chatMsg = ChatMessage (Just $ nickname user) (lines msg) Dimmed
 updateState (UserJoined user channel) =
-  appendChatMessage chatMsg channel . addNicknameToChannel (nickname user) channel
+  appendChatMessage chatMsg channel
+    . addNicknameToChannel (nickname user) channel
   where
     chatMsg = ChatMessage Nothing [nickOf user <> " joined"] Dimmed
 updateState (UserLeft user channel reason) =
-  appendChatMessage chatMsg channel . addNicknameToChannel (nickname user) channel
+  appendChatMessage chatMsg channel
+    . addNicknameToChannel (nickname user) channel
   where
     reasonText = case reason of Nothing -> ""; Just (Reason r) -> ", " <> r
     chatMsg =
       ChatMessage Nothing [nickOf user <> "left ", reasonText] Dimmed
-updateState (NickChanged user n@(Nickname nick)) = \st ->
-  let channels = appChannels st & Map.keysSet
-   in Set.fold (appendChatMessage chatMsg) st channels
-        & modifyUserNick (nickname user) n
+updateState (NickChanged user n@(Nickname nick)) =
+  updateNick (nickname user) n . broadcastToAllChannels chatMsg
   where
     chatText = nickOf user <> " is now known as " <> nick
     chatMsg = ChatMessage Nothing [chatText] Dimmed
-updateState (UserDisconnected user _reason) = \st ->
-  let channels = appChannels st & Map.keysSet
-   in Set.fold (appendChatMessage chatMsg) st channels
-        & removeNicknameFromAllChannels (nickname user)
+updateState (UserDisconnected user _reason) =
+  removeNicknameFromAllChannels (nickname user) . broadcastToAllChannels chatMsg
   where
     chatText = nickOf user <> " disconnected"
     chatMsg = ChatMessage Nothing [chatText] Dimmed
-updateState (ChannelUsers channel nicks) = \st ->
-  Set.fold (`addNicknameToChannel` channel) st nicks
+updateState (ChannelUsers channel nicks) =
+  modifyChannel channel $ modifyChannelNicknames (nicks <>)
 updateState (ChannelListEntry channel count topic) =
   appendChatMessage chatMsg channel
   where
-    chatTxts = ["[LIST] " <> channelToText channel <> "(" <> show count, " users)", topic]
+    countTxt = "(" <> show count <> " users)"
+    chatTxts = [unwords ["[LIST] " <> channelToText channel, countTxt, topic]]
     chatMsg = ChatMessage Nothing chatTxts Dimmed
-updateState (TopicReceived channel topic) =
-  appendChatMessage chatMsg channel
+updateState (TopicReceived channel topic) = appendChatMessage chatMsg channel
   where
     chatMsg = ChatMessage Nothing ["[TOPIC] " <> topic] Dimmed
 updateState (Disconnected reason) = \st ->
-  let channels = appChannels st & Map.keysSet
-      nick@(Nickname nickTxt) = nickname $ appUser st
+  let nick@(Nickname nickTxt) = nickname $ appUser st
       chatText = nickTxt <> " disconnected, " <> reason
       chatMsg = ChatMessage Nothing [chatText] Dimmed
-   in Set.fold (appendChatMessage chatMsg) st channels
-        & removeNicknameFromAllChannels nick
+   in removeNicknameFromAllChannels nick $ broadcastToAllChannels chatMsg st
 updateState _ = id
 
 --------------------------------------------------------------------------------
@@ -106,33 +108,36 @@ modifyChannel ::
 modifyChannel channel update st =
   st {appChannels = Map.adjust update channel (appChannels st)}
 
+modifyAllChannels :: (ChannelState -> ChannelState) -> AppState -> AppState
+modifyAllChannels f st = st {appChannels = appChannels st <&> f}
+
 appendChatMessage :: ChatMessage -> Channel -> AppState -> AppState
-appendChatMessage msg channel = modifyChannel channel $ \uiChannel ->
-  uiChannel {channelMessages = channelMessages uiChannel <> [msg]}
+appendChatMessage msg channel =
+  modifyChannel channel $ appendChannelMessages [msg]
 
 appendServerChatMessage :: ChatMessage -> AppState -> AppState
-appendServerChatMessage msg st = st {appHostMessages = appHostMessages st <> [msg]}
+appendServerChatMessage msg st =
+  st {appHostMessages = appHostMessages st <> [msg]}
+
+broadcastToAllChannels :: ChatMessage -> AppState -> AppState
+broadcastToAllChannels chatMsg =
+  modifyAllChannels $ appendChannelMessages [chatMsg]
 
 addNicknameToChannel :: Nickname -> Channel -> AppState -> AppState
 addNicknameToChannel user channel = modifyChannel channel $ \uiChannel ->
   uiChannel {channelNicknames = Set.insert user $ channelNicknames uiChannel}
 
 removeNicknameFromChannel :: Nickname -> Channel -> AppState -> AppState
-removeNicknameFromChannel user channel =
-  modifyChannel channel $ \uiChannel@ChannelState {..} ->
-    uiChannel {channelNicknames = Set.delete user channelNicknames}
+removeNicknameFromChannel nick channel =
+  modifyChannel channel $ modifyChannelNicknames $ Set.delete nick
 
 removeNicknameFromAllChannels :: Nickname -> AppState -> AppState
-removeNicknameFromAllChannels nick = modifyAllChannels $ \uiChannel ->
-  uiChannel {channelNicknames = Set.delete nick $ channelNicknames uiChannel}
+removeNicknameFromAllChannels nick =
+  modifyAllChannels $ modifyChannelNicknames $ Set.delete nick
 
-modifyAllChannels :: (ChannelState -> ChannelState) -> AppState -> AppState
-modifyAllChannels update st = st {appChannels = update <$> appChannels st}
-
-modifyUserNick :: Nickname -> Nickname -> AppState -> AppState
-modifyUserNick old new = modifyAllChannels $ \uiChannel ->
-  let newNicks = Set.delete old $ Set.insert new $ channelNicknames uiChannel
-   in uiChannel {channelNicknames = newNicks}
+updateNick :: Nickname -> Nickname -> AppState -> AppState
+updateNick old new =
+  modifyAllChannels $ modifyChannelNicknames $ Set.delete old . Set.insert new
 
 goToNextChannel :: AppState -> AppState
 goToNextChannel st = fromMaybe st $ do
