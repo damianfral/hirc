@@ -21,6 +21,9 @@ import Network.Socket (HostName)
 import Relude
 import UI.AppState
 
+channelSelectedAttr :: AttrName
+channelSelectedAttr = attrName "channelSelected"
+
 uiApp :: App AppState Event ViewportName
 uiApp =
   App
@@ -28,8 +31,10 @@ uiApp =
       appChooseCursor = const $ showCursorNamed ChatInput,
       appHandleEvent = handleEvent,
       appStartEvent = pure (),
-      appAttrMap = const $ A.attrMap V.defAttr []
+      appAttrMap = const $ A.attrMap V.defAttr attributes
     }
+  where
+    attributes = [(channelSelectedAttr, V.defAttr `V.withStyle` V.bold)]
 
 handleEvent :: BrickEvent ViewportName Event -> EventM ViewportName AppState ()
 handleEvent (VtyEvent (V.EvKey V.KEsc [])) = haltWithQuit
@@ -88,6 +93,19 @@ emptyEditor = editorText ChatInput Nothing ""
 resetUserInput :: AppState -> AppState
 resetUserInput st = st {appInput = emptyEditor}
 
+viewChannels :: Map Channel ChannelState -> Maybe Channel -> Widget ViewportName
+viewChannels chans current =
+  if Map.null chans
+    then txt "  No channels"
+    else
+      vBox
+        [ let isSelected = Just k == current
+              label = "  " <> channelToText k
+              w = txt label
+           in if isSelected then withAttr channelSelectedAttr w else w
+        | (k, _v) <- Map.toList chans
+        ]
+
 viewMembers :: Set Nickname -> Widget ViewportName
 viewMembers nicks = vBox $ txt . unNickname <$> toList nicks
 
@@ -101,12 +119,22 @@ viewMessages msgs = withClickableVScrollBars Scrollable $ do
 viewUI :: AppState -> [Widget ViewportName]
 viewUI AppState {..} = [vBox [mainWidget, chatBar]]
   where
+    channelListWidget =
+      hLimit 20
+        $ borderWithLabel (txt " channels ")
+        $ withVScrollBars OnRight
+        $ viewport Channels Vertical
+        $ viewChannels appChannels appCurrentChannel
     mainWidget = case appCurrentChannel of
-      Nothing -> borderWithLabel (txt $ " " <> appHost <> " ") $ do
-        viewMessages appHostMessages
+      Nothing ->
+        hBox
+          [ channelListWidget,
+            borderWithLabel (txt $ " " <> appHost <> " ") $ viewMessages appHostMessages
+          ]
       Just channel ->
         hBox
-          [ borderWithLabel (viewChannelName channel)
+          [ channelListWidget,
+            borderWithLabel (viewChannelName channel)
               $ viewMessages
               $ fromMaybe [] currentChannelMessages,
             hLimit 20

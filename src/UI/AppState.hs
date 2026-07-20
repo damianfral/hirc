@@ -18,6 +18,7 @@ data ViewportName
   | ChatInput
   | Scrollable ClickableScrollbarElement ViewportName
   | ChatMembers
+  | Channels
   deriving (Show, Ord, Eq)
 
 data ChannelState = ChannelState
