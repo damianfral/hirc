@@ -21,8 +21,17 @@ data ViewportName
   | Scrollable ClickableScrollbarElement ViewportName
   deriving (Show, Ord, Eq)
 
+data ChatMessage = ChatMessage
+  { -- | Nothing for nmessages comming from server
+    chatMessageFrom :: Maybe Nickname,
+    chatMessageContent :: [Text],
+    chatMessageTag :: Tag
+  }
+
+data Tag = Normal | Dimmed | Mention
+
 data ChannelState = ChannelState
-  { channelMessages :: [Text],
+  { channelMessages :: [ChatMessage],
     channelNicknames :: Set Nickname
   }
 
@@ -32,43 +41,62 @@ data AppState = AppState
     appChannels :: Map Channel ChannelState,
     appCurrentChannel :: Maybe Channel,
     appHost :: Text,
-    appHostMessages :: [Text],
+    appHostMessages :: [ChatMessage],
     appInput :: Editor Text ViewportName
   }
 
 updateState :: Event -> AppState -> AppState
-updateState (Connected server _welcome) =
-  appendServerMessage $ "Connected to " <> show server
+updateState (Connected server _welcome) = appendServerChatMessage chatMsg
+  where
+    chatMsg = ChatMessage Nothing ["Connected to " <> show server] Dimmed
 updateState (MessageReceived user (TargetChannel channel) msg) =
-  appendMessage msg channel (Just $ nickname user)
+  appendChatMessage (ChatMessage (Just $ nickname user) (lines msg) Normal) channel
 updateState (NoticeReceived user (TargetChannel channel) msg) =
-  appendMessage ("[NOTICE] " <> nickOf user <> ": " <> msg) channel Nothing
+  appendChatMessage chatMsg channel
+  where
+    chatMsg = ChatMessage (Just $ nickname user) (lines msg) Dimmed
 updateState (UserJoined user channel) =
-  let msg = "--> " <> nickOf user <> " joined"
-   in modifyChannel channel $ \uiChannel@ChannelState {..} ->
-        uiChannel
-          { channelMessages = channelMessages <> [msg],
-            channelNicknames = Set.insert (nickname user) channelNicknames
-          }
-updateState (UserLeft user channel _reason) =
-  appendMessage ("<-- " <> nickOf user <> " left") channel Nothing
-    . removeNicknameFromChannel (nickname user) channel
-updateState (NickChanged user n@(Nickname nick)) =
-  appendServerMessage (nickOf user <> " is now known as " <> nick)
-    . modifyUserNick (nickname user) n
-updateState (UserDisconnected user _reason) =
-  appendServerMessage ("<-- " <> nickOf user <> " quit")
-    . removeNicknameFromAllChannels (nickname user)
-updateState (ChannelUsers channel nicks) = addNicknamesToChannel nicks channel
+  appendChatMessage chatMsg channel . addNicknameToChannel (nickname user) channel
+  where
+    chatMsg = ChatMessage Nothing [nickOf user <> " joined"] Dimmed
+updateState (UserLeft user channel reason) =
+  appendChatMessage chatMsg channel . addNicknameToChannel (nickname user) channel
+  where
+    reasonText = case reason of Nothing -> ""; Just (Reason r) -> ", " <> r
+    chatMsg =
+      ChatMessage Nothing [nickOf user <> "left ", reasonText] Dimmed
+updateState (NickChanged user n@(Nickname nick)) = \st ->
+  let channels = appChannels st & Map.keysSet
+   in Set.fold (appendChatMessage chatMsg) st channels
+        & modifyUserNick (nickname user) n
+  where
+    chatText = nickOf user <> " is now known as " <> nick
+    chatMsg = ChatMessage Nothing [chatText] Dimmed
+updateState (UserDisconnected user _reason) = \st ->
+  let channels = appChannels st & Map.keysSet
+   in Set.fold (appendChatMessage chatMsg) st channels
+        & removeNicknameFromAllChannels (nickname user)
+  where
+    chatText = nickOf user <> " disconnected"
+    chatMsg = ChatMessage Nothing [chatText] Dimmed
+updateState (ChannelUsers channel nicks) = \st ->
+  Set.fold (`addNicknameToChannel` channel) st nicks
 updateState (ChannelListEntry channel count topic) =
-  let msg =
-        unwords
-          ["[LIST]", channelToText channel, "(" <> show count, " users)", topic]
-   in appendMessage msg channel Nothing
+  appendChatMessage chatMsg channel
+  where
+    chatTxts = ["[LIST] " <> channelToText channel <> "(" <> show count, " users)", topic]
+    chatMsg = ChatMessage Nothing chatTxts Dimmed
 updateState (TopicReceived channel topic) =
-  appendMessage ("Topic: " <> topic) channel Nothing
-updateState (Disconnected reason) =
-  appendServerMessage $ "Disconnected: " <> reason
+  appendChatMessage chatMsg channel
+  where
+    chatMsg = ChatMessage Nothing ["[TOPIC] " <> topic] Dimmed
+updateState (Disconnected reason) = \st ->
+  let channels = appChannels st & Map.keysSet
+      nick@(Nickname nickTxt) = nickname $ appUser st
+      chatText = nickTxt <> " disconnected, " <> reason
+      chatMsg = ChatMessage Nothing [chatText] Dimmed
+   in Set.fold (appendChatMessage chatMsg) st channels
+        & removeNicknameFromAllChannels nick
 updateState _ = id
 
 --------------------------------------------------------------------------------
@@ -78,19 +106,16 @@ modifyChannel ::
 modifyChannel channel update st =
   st {appChannels = Map.adjust update channel (appChannels st)}
 
-appendMessage :: Text -> Channel -> Maybe Nickname -> AppState -> AppState
-appendMessage msg channel Nothing =
-  modifyChannel channel $ \uiChannel ->
-    uiChannel {channelMessages = channelMessages uiChannel <> [msg]}
-appendMessage msg channel (Just (Nickname nick)) =
-  appendMessage (nick <> ": " <> msg) channel Nothing
+appendChatMessage :: ChatMessage -> Channel -> AppState -> AppState
+appendChatMessage msg channel = modifyChannel channel $ \uiChannel ->
+  uiChannel {channelMessages = channelMessages uiChannel <> [msg]}
 
-appendServerMessage :: Text -> AppState -> AppState
-appendServerMessage msg st = st {appHostMessages = appHostMessages st <> [msg]}
+appendServerChatMessage :: ChatMessage -> AppState -> AppState
+appendServerChatMessage msg st = st {appHostMessages = appHostMessages st <> [msg]}
 
-addNicknamesToChannel :: Set Nickname -> Channel -> AppState -> AppState
-addNicknamesToChannel users channel = modifyChannel channel $ \uiChannel ->
-  uiChannel {channelNicknames = users <> channelNicknames uiChannel}
+addNicknameToChannel :: Nickname -> Channel -> AppState -> AppState
+addNicknameToChannel user channel = modifyChannel channel $ \uiChannel ->
+  uiChannel {channelNicknames = Set.insert user $ channelNicknames uiChannel}
 
 removeNicknameFromChannel :: Nickname -> Channel -> AppState -> AppState
 removeNicknameFromChannel user channel =

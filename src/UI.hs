@@ -24,6 +24,9 @@ import UI.AppState
 channelSelectedAttr :: AttrName
 channelSelectedAttr = attrName "channelSelected"
 
+dimmedAttr :: AttrName
+dimmedAttr = attrName "dimmed"
+
 uiApp :: App AppState Event ViewportName
 uiApp =
   App
@@ -34,7 +37,10 @@ uiApp =
       appAttrMap = const $ A.attrMap V.defAttr attributes
     }
   where
-    attributes = [(channelSelectedAttr, V.defAttr `V.withStyle` V.bold)]
+    attributes =
+      [ (channelSelectedAttr, V.defAttr `V.withStyle` V.bold),
+        (dimmedAttr, V.defAttr `V.withStyle` V.dim)
+      ]
 
 handleEvent :: BrickEvent ViewportName Event -> EventM ViewportName AppState ()
 handleEvent (VtyEvent (V.EvKey V.KEsc [])) = haltWithQuit
@@ -118,9 +124,22 @@ viewMembers nicks = vBox $ txt . unNickname <$> toList nicks
 viewChannelName :: Channel -> Widget n
 viewChannelName = txt . channelToText
 
-viewMessages :: [Text] -> Widget ViewportName
-viewMessages msgs = withClickableVScrollBars Scrollable $ do
-  withVScrollBars OnRight $ viewport Messages Vertical $ vBox $ txt <$> msgs
+viewChatMessages :: [ChatMessage] -> Widget ViewportName
+viewChatMessages msgs = withClickableVScrollBars Scrollable $ do
+  withVScrollBars OnRight $ viewport Messages Vertical $ do
+    vBox $ viewChatMessage <$> msgs
+
+viewChatMessage :: ChatMessage -> Widget ViewportName
+viewChatMessage (ChatMessage Nothing msg tag) =
+  let w = vBox $ txt <$> msg
+   in case tag of
+        Dimmed -> withAttr dimmedAttr w
+        _ -> w
+viewChatMessage (ChatMessage (Just (Nickname nick)) msg tag) =
+  let w = hBox [txtWrap $ T.concat $ [nick, ": "] <> msg]
+   in case tag of
+        Dimmed -> withAttr dimmedAttr w
+        _ -> w
 
 viewUI :: AppState -> [Widget ViewportName]
 viewUI AppState {..} = [vBox [mainWidget, chatBar]]
@@ -135,13 +154,13 @@ viewUI AppState {..} = [vBox [mainWidget, chatBar]]
       Nothing ->
         hBox
           [ channelListWidget,
-            borderWithLabel (txt $ " " <> appHost <> " ") $ viewMessages appHostMessages
+            borderWithLabel (txt $ " " <> appHost <> " ") $ viewChatMessages appHostMessages
           ]
       Just channel ->
         hBox
           [ channelListWidget,
             borderWithLabel (viewChannelName channel)
-              $ viewMessages
+              $ viewChatMessages
               $ fromMaybe [] currentChannelMessages,
             hLimit 20
               $ borderWithLabel (txt " members ")
@@ -260,35 +279,41 @@ handleSendMessage text = do
       let target = TargetChannel channel
       liftIO $ writeAction (appClient st) $ SendMessage target text
       -- Since we have not implemented echo-message, just append the message.
-      modify $ appendMessage text channel (Just $ nickname $ appUser st)
+      modify
+        $ appendChatMessage
+          (ChatMessage (Just $ nickname $ appUser st) [text] Normal)
+          channel
 
 handleHelp :: EventM ViewportName AppState ()
 handleHelp = do
   st <- get
   modify $ case appCurrentChannel st of
-    Nothing -> appendServerMessage helpMsg
-    Just channel -> appendMessage helpMsg channel Nothing
+    Nothing -> appendServerChatMessage $ ChatMessage Nothing helpMsg Dimmed
+    Just channel ->
+      let chatMsg = ChatMessage Nothing helpMsg Dimmed
+       in appendChatMessage chatMsg channel
   where
     helpMsg =
-      T.unlines
-        [ "Available commands:",
-          "  /help            - Show this help message",
-          "  /join #channel   - Join a channel",
-          "  /part            - Leave the current channel",
-          "  /names           - List members in the current channel",
-          "  /list            - List available channels",
-          "  /nick <nickname> - Change your nickname",
-          "  /topic [#channel] <topic> - View or set the channel topic",
-          "  /away [reason]   - Set yourself as away",
-          "  /quit [reason]   - Quit the application"
-        ]
+      [ "Available commands:",
+        "  /help            - Show this help message",
+        "  /join #channel   - Join a channel",
+        "  /part            - Leave the current channel",
+        "  /names           - List members in the current channel",
+        "  /list            - List available channels",
+        "  /nick <nickname> - Change your nickname",
+        "  /topic [#channel] <topic> - View or set the channel topic",
+        "  /away [reason]   - Set yourself as away",
+        "  /quit [reason]   - Quit the application"
+      ]
 
 handleNick :: Text -> EventM ViewportName AppState ()
 handleNick msg = case T.words msg of
   [_cmd, nick] -> do
     st <- get
     liftIO $ writeAction (appClient st) $ SetNickname (Nickname nick)
-  _ -> modify $ appendServerMessage "Usage: /nick <nickname>"
+  _ -> do
+    let chatMsg = ChatMessage Nothing ["Usage: /nick <nickname>"] Dimmed
+    modify $ appendServerChatMessage chatMsg
 
 handleAway :: Text -> EventM ViewportName AppState ()
 handleAway msg = do
@@ -314,7 +339,10 @@ handleTopic msg = do
             Just channel -> Just $ Topic channel Nothing
           _ -> Nothing
   case mAction of
-    Nothing -> modify $ appendServerMessage "Usage: /topic [#channel] <topic>"
+    Nothing -> do
+      let chatMsg =
+            ChatMessage Nothing ["Usage: /topic [#channel] <topic>"] Dimmed
+      modify $ appendServerChatMessage chatMsg
     Just action -> liftIO $ writeAction appClient action
 
 --------------------------------------------------------------------------------
