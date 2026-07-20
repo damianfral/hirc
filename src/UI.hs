@@ -160,7 +160,8 @@ viewUI AppState {..} = [vBox [mainWidget, chatBar]]
       chanName <- appCurrentChannel
       uiChann <- Map.lookup chanName appChannels
       pure $ channelNicknames uiChann
-    chatBar = vLimit 3 $ border $ hBox [str "> ", inputWidget]
+    chatBar = vLimit 3 $ border $ hBox $ do
+      [str $ toString $ (nickname appUser & unNickname) <> ": ", inputWidget]
     inputWidget = renderEditor viewEditorLines True appInput
     viewEditorLines = txt . T.unlines
 
