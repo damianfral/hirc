@@ -68,7 +68,7 @@ updateState ts (UserJoined user channel) =
     chatMsg = ChatMessage ts Nothing [nickOf user <> " joined"] Dimmed
 updateState ts (UserLeft user channel reason) =
   appendChatMessage chatMsg channel
-    . addNicknameToChannel (nickname user) channel
+    . removeNicknameFromChannel (nickname user) channel
   where
     reasonText = case reason of Nothing -> ""; Just (Reason r) -> ", " <> r
     chatMsg =
