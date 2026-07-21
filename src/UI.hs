@@ -7,6 +7,7 @@ module UI (runUI) where
 import Brick
 import qualified Brick.AttrMap as A
 import Brick.BChan (BChan, newBChan, writeBChan)
+import qualified Brick.Keybindings.KeyDispatcher as KD
 import Brick.Widgets.Border (border, borderWithLabel)
 import Brick.Widgets.Edit (Editor, editorText, getEditContents, handleEditorEvent, renderEditor)
 import Control.Concurrent.Async (async, cancel)
@@ -20,6 +21,7 @@ import IRC.Protocol (Nickname (..), User (..))
 import Network.Socket (HostName)
 import Relude
 import UI.AppState
+import UI.KeyEvent
 
 channelSelectedAttr :: AttrName
 channelSelectedAttr = attrName "channelSelected"
@@ -42,24 +44,38 @@ uiApp =
         (dimmedAttr, V.defAttr `V.withStyle` V.dim)
       ]
 
+-- TODO: we are ignoring conflicting keybindings
+keyDispatcher :: Maybe (KD.KeyDispatcher KeyEvent (EventM ViewportName AppState))
+keyDispatcher = case KD.keyDispatcher keyConfig handlers of
+  Right d -> Just d
+  Left _conflictingKeybindings -> Nothing
+
+handlers :: [KD.KeyEventHandler KeyEvent (EventM ViewportName AppState)]
+handlers =
+  [ KD.onEvent EvQuit "Quit the application" haltWithQuit,
+    KD.onEvent EvScrollUp "Scroll messages up"
+      $ vScrollPage (viewportScroll Messages) Brick.Up,
+    KD.onEvent EvScrollDown "Scroll messages down"
+      $ vScrollPage (viewportScroll Messages) Brick.Down,
+    KD.onEvent EvNextChannel "Go to next channel"
+      $ modify goToNextChannel,
+    KD.onEvent EvPrevChannel "Go to previous channel"
+      $ modify goToPrevChannel,
+    KD.onEvent EvActivate "Send message or run command" handleEnter
+  ]
+
 handleEvent :: BrickEvent ViewportName Event -> EventM ViewportName AppState ()
-handleEvent (VtyEvent (V.EvKey V.KEsc [])) = haltWithQuit
-handleEvent (VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl])) = haltWithQuit
-handleEvent (VtyEvent (V.EvKey V.KPageUp [])) =
-  vScrollPage (viewportScroll Messages) Brick.Up
-handleEvent (VtyEvent (V.EvKey V.KPageDown [])) =
-  vScrollPage (viewportScroll Messages) Brick.Down
-handleEvent (VtyEvent (V.EvKey V.KDown [])) = handleNextChannel
-handleEvent (VtyEvent (V.EvKey V.KUp [])) = handlePrevChannel
-handleEvent (VtyEvent (V.EvKey (V.KChar 'n') [V.MCtrl])) = handleNextChannel
-handleEvent (VtyEvent (V.EvKey (V.KChar 'p') [V.MCtrl])) = handlePrevChannel
-handleEvent (VtyEvent (V.EvKey (V.KChar 'j') [V.MCtrl])) = handleNextChannel
-handleEvent (VtyEvent (V.EvKey (V.KChar 'k') [V.MCtrl])) = handlePrevChannel
-handleEvent (VtyEvent (V.EvKey V.KEnter [])) = handleEnter
-handleEvent ev@(VtyEvent _) = do
-  st <- get
-  newEditor <- nestEventM' (appInput st) $ handleEditorEvent ev
-  put $ st {appInput = newEditor}
+handleEvent (VtyEvent k@(V.EvKey key mods)) = do
+  handled <- dispatcher
+  when (not handled) $ do
+    st <- get
+    newEditor <- nestEventM' (appInput st) $ handleEditorEvent (VtyEvent k)
+    put $ st {appInput = newEditor}
+  where
+    dispatcher = case keyDispatcher of
+      Nothing -> pure False
+      Just kd -> KD.handleKey kd key mods
+handleEvent (VtyEvent _) = pure ()
 handleEvent (AppEvent event) = do
   modify $ updateState event
   scrollMessagesToEnd
@@ -214,12 +230,6 @@ handleEnter = do
       | otherwise -> handleSendMessage msg
 
   modify resetUserInput
-
-handleNextChannel :: EventM ViewportName AppState ()
-handleNextChannel = modify goToNextChannel
-
-handlePrevChannel :: EventM ViewportName AppState ()
-handlePrevChannel = modify goToPrevChannel
 
 handleJoin :: Text -> EventM ViewportName AppState ()
 handleJoin msg = case T.words msg of
