@@ -9,6 +9,7 @@ import qualified Brick.Keybindings.KeyDispatcher as KD
 import Brick.Keybindings.Pretty (keybindingTextTable)
 import Brick.Widgets.Edit (applyEdit, getEditContents, handleEditorEvent)
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Text.Zipper (breakLine)
 import Data.Time.Clock (getCurrentTime)
@@ -80,46 +81,63 @@ handleEnter :: EventM ViewportName AppState ()
 handleEnter = do
   AppState {..} <- get
   let content = T.intercalate "\n" $ T.strip <$> getEditContents appInput
-  case content of
-    "" -> pure ()
-    "/help" -> handleHelp
-    "/part" -> handleLeave
-    "/names" -> handleNames
-    "/list" -> handleList
-    msg
-      | "/join" `T.isPrefixOf` msg -> handleJoin msg
-      | "/nick" `T.isPrefixOf` msg -> handleNick msg
-      | "/away" `T.isPrefixOf` msg -> handleAway msg
-      | "/topic" `T.isPrefixOf` msg -> handleTopic msg
-      | "/notice" `T.isPrefixOf` msg -> handleNotice msg
-      | "/quit" `T.isPrefixOf` msg -> handleQuit msg
-      | otherwise -> handleSendMessage msg
+  if "/" `T.isPrefixOf` content
+    then handleCommand content
+    else handleSendMessage content
   modify resetUserInput
 
-handleJoin :: Text -> EventM ViewportName AppState ()
-handleJoin msg = case T.words msg of
-  [_cmd, ch] -> do
-    let channel = Channel (T.dropWhile (== '#') ch)
-    st <- get
-    when (Map.notMember channel (appChannels st)) $ do
-      liftIO $ writeAction (appClient st) $ JoinChannel channel
-    let newChannelState = ChannelState mempty mempty
-    modify $ \st' ->
-      let newChannels = Map.insert channel newChannelState (appChannels st')
-       in st' {appChannels = newChannels, appCurrentChannel = Just channel}
-  _ -> pure ()
+handleCommand :: Text -> EventM ViewportName AppState ()
+handleCommand cmd = case T.words cmd of
+  ["/help"] -> handleHelp
+  "/quit" : args | length args <= 1 -> handleQuit $ Reason <$> maybeAt 0 args
+  ["/join", channel] -> handleJoin $ makeChannel channel
+  ["/part"] -> handleLeave Nothing Nothing
+  "/part" : args
+    | length args == 1 -> handleLeave Nothing (Reason <$> maybeAt 0 args)
+  "/part" : args
+    | length args == 2 ->
+        handleLeave (makeChannel <$> maybeAt 0 args) (Reason <$> maybeAt 1 args)
+  ["/names"] -> handleNames
+  ["/list"] -> handleList
+  ["/nick", nickname] -> handleNick $ Nickname nickname
+  "/away" : args | length args <= 1 -> handleAway $ Reason <$> maybeAt 0 args
+  "/notice" : msgWords -> handleNotice $ T.unwords msgWords
+  "/topic" : args | length args == 1 -> handleTopic Nothing (maybeAt 0 args)
+  "/topic" : args | length args == 2 -> do
+    handleTopic (makeChannel <$> maybeAt 0 args) (maybeAt 1 args)
+  _ -> handleHelp
+  where
+    makeChannel ch = Channel (T.dropWhile (== '#') ch)
 
-handleLeave :: EventM ViewportName AppState ()
-handleLeave = do
+handleJoin :: Channel -> EventM ViewportName AppState ()
+handleJoin channel = do
   st <- get
-  case appCurrentChannel st of
-    Nothing -> pure ()
+  when (Map.notMember channel (appChannels st)) $ do
+    liftIO $ writeAction (appClient st) $ JoinChannel channel
+  let newChannelState = ChannelState mempty mempty
+  let newChannels = Map.insert channel newChannelState (appChannels st)
+  put st {appChannels = newChannels, appCurrentChannel = Just channel}
+
+handleLeave :: Maybe Channel -> Maybe Reason -> EventM ViewportName AppState ()
+handleLeave mChannel reason = do
+  st <- get
+  case mChannel <|> appCurrentChannel st of
+    Nothing -> handleHelp
     Just channel -> do
-      liftIO $ writeAction (appClient st) $ LeaveChannel channel Nothing
-      let newChannelState = ChannelState mempty mempty
-      modify $ \st' ->
-        let newChannels = Map.insert channel newChannelState (appChannels st')
-         in st' {appChannels = newChannels, appCurrentChannel = Nothing}
+      liftIO $ writeAction (appClient st) $ LeaveChannel channel reason
+      let newChannels = Map.delete channel $ appChannels st
+      let channels = Map.keysSet $ appChannels st
+      let currentChannelUpdate =
+            if appCurrentChannel st == Just channel
+              then
+                if channels == Set.singleton channel
+                  then \s -> s {appCurrentChannel = Nothing}
+                  else
+                    if Set.lookupMax channels == Just channel
+                      then goToPrevChannel
+                      else goToNextChannel
+              else id
+      modify $ (\s -> s {appChannels = newChannels}) . currentChannelUpdate
 
 handleList :: EventM ViewportName AppState ()
 handleList = get >>= \st -> liftIO $ writeAction (appClient st) ListChannels
@@ -131,13 +149,10 @@ handleNames = do
     Nothing -> pure ()
     Just channel -> liftIO $ writeAction (appClient st) (ListMembers channel)
 
-handleQuit :: Text -> EventM ViewportName AppState ()
-handleQuit msg = do
-  let reason = case T.words msg of
-        [_cmd, r] -> Just (Reason r)
-        _ -> Nothing
-  AppState {..} <- get
-  liftIO $ writeAction appClient (Quit reason)
+handleQuit :: Maybe Reason -> EventM ViewportName AppState ()
+handleQuit mReason = do
+  st <- get
+  liftIO $ writeAction (appClient st) (Quit mReason)
   halt
 
 handleSendMessage :: Text -> EventM ViewportName AppState ()
@@ -199,43 +214,19 @@ handleHelp = do
     Just channel -> appendChatMessage chatMsg channel
   scrollMessagesToEnd
 
-handleNick :: Text -> EventM ViewportName AppState ()
-handleNick msg = case T.words msg of
-  [_cmd, nick] -> do
-    st <- get
-    liftIO $ writeAction (appClient st) $ SetNickname (Nickname nick)
-  _ -> do
-    ts <- liftIO getCurrentTime
-    let chatMsg = ChatMessage ts Nothing ["Usage: /nick <nickname>"] Dimmed
-    modify $ appendServerChatMessage chatMsg
+handleNick :: Nickname -> EventM ViewportName AppState ()
+handleNick nickname = do
+  st <- get
+  liftIO $ writeAction (appClient st) $ SetNickname nickname
 
-handleAway :: Text -> EventM ViewportName AppState ()
-handleAway msg = do
-  let reason = case T.words msg of
-        [_cmd, r] -> Just (Reason r)
-        _ -> Nothing
+handleAway :: Maybe Reason -> EventM ViewportName AppState ()
+handleAway reason = do
   st <- get
   liftIO $ writeAction (appClient st) $ SetAway reason
 
-handleTopic :: Text -> EventM ViewportName AppState ()
-handleTopic msg = do
+handleTopic :: Maybe Channel -> Maybe Text -> EventM ViewportName AppState ()
+handleTopic mChannel mTopic = do
   AppState {..} <- get
-  let mAction =
-        case T.words msg of
-          [_cmd, ch, t] ->
-            let channel = Channel (T.dropWhile (== '#') ch)
-             in Just $ Topic channel (Just t)
-          [_cmd, t] -> case appCurrentChannel of
-            Nothing -> Nothing
-            Just channel -> Just $ Topic channel (Just t)
-          [_cmd] -> case appCurrentChannel of
-            Nothing -> Nothing
-            Just channel -> Just $ Topic channel Nothing
-          _ -> Nothing
-  case mAction of
-    Nothing -> do
-      ts <- liftIO getCurrentTime
-      let chatMsg =
-            ChatMessage ts Nothing ["Usage: /topic [#channel] <topic>"] Dimmed
-      modify $ appendServerChatMessage chatMsg
-    Just action -> liftIO $ writeAction appClient action
+  case mChannel <|> appCurrentChannel of
+    Nothing -> handleHelp
+    Just channel -> liftIO $ writeAction appClient $ Topic channel mTopic
