@@ -226,7 +226,8 @@ handleJoin msg = case T.words msg of
   [_cmd, ch] -> do
     let channel = Channel (T.dropWhile (== '#') ch)
     st <- get
-    liftIO $ writeAction (appClient st) $ JoinChannel channel
+    when (Map.notMember channel (appChannels st)) $ do
+      liftIO $ writeAction (appClient st) $ JoinChannel channel
     let newChannelState = ChannelState mempty mempty
     modify $ \st' ->
       let newChannels = Map.insert channel newChannelState (appChannels st')
