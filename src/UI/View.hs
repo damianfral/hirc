@@ -5,7 +5,7 @@ module UI.View where
 
 import Brick
 import Brick.Widgets.Border (border, borderWithLabel)
-import Brick.Widgets.Edit (renderEditor)
+import Brick.Widgets.Edit (getEditContents, renderEditor)
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import Data.Time (UTCTime)
@@ -103,7 +103,8 @@ viewUI AppState {..} = [vBox [mainWidget, chatBar]]
       chanName <- appCurrentChannel
       uiChann <- Map.lookup chanName appChannels
       pure $ channelNicknames uiChann
-    chatBar = vLimit 3 $ border $ hBox $ do
-      [viewNickname $ nickname appUser, inputWidget]
+    chatBar =
+      vLimit (2 + length (getEditContents appInput)) $ border $ hBox $ do
+        [viewNickname $ nickname appUser, inputWidget]
     inputWidget = renderEditor viewEditorLines True appInput
     viewEditorLines = txt . T.unlines

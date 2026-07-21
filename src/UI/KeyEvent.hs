@@ -33,8 +33,8 @@ defaultBindings =
   [ (EvQuit, [KC.bind V.KEsc, KC.ctrl 'c']),
     (EvScrollUp, [KC.bind V.KPageUp]),
     (EvScrollDown, [KC.bind V.KPageDown]),
-    (EvNextChannel, [KC.bind V.KDown, KC.ctrl 'n', KC.ctrl 'j']),
-    (EvPrevChannel, [KC.bind V.KUp, KC.ctrl 'p', KC.ctrl 'k']),
+    (EvNextChannel, [KC.ctrl 'n', KC.ctrl 'j']),
+    (EvPrevChannel, [KC.ctrl 'p', KC.ctrl 'k']),
     (EvActivate, [KC.bind V.KEnter])
   ]
 

@@ -6,9 +6,10 @@ module UI.EventHandler where
 
 import Brick
 import qualified Brick.Keybindings.KeyDispatcher as KD
-import Brick.Widgets.Edit (getEditContents, handleEditorEvent)
+import Brick.Widgets.Edit (applyEdit, getEditContents, handleEditorEvent)
 import qualified Data.Map as Map
 import qualified Data.Text as T
+import Data.Text.Zipper (breakLine)
 import Data.Time.Clock (getCurrentTime)
 import qualified Graphics.Vty as V
 import IRC.Client
@@ -19,12 +20,14 @@ import UI.AppState
 import UI.KeyEvent
 
 handleEvent :: BrickEvent ViewportName Event -> EventM ViewportName AppState ()
-handleEvent (VtyEvent k@(V.EvKey key mods)) = do
+handleEvent (VtyEvent (V.EvKey (V.KChar 'o') [V.MCtrl])) =
+  modify $ modifyUserInput $ applyEdit breakLine
+handleEvent e@(VtyEvent (V.EvKey key mods)) = do
   handled <- dispatcher
   when (not handled) $ do
     st <- get
-    newEditor <- nestEventM' (appInput st) $ handleEditorEvent (VtyEvent k)
-    put $ st {appInput = newEditor}
+    newEditor <- nestEventM' (appInput st) $ handleEditorEvent e
+    modify $ modifyUserInput $ const newEditor
   where
     dispatcher = case keyDispatcher of
       Nothing -> pure False
