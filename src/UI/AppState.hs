@@ -161,6 +161,12 @@ prevChannel currentChannel channels =
       i <- Set.lookupIndex currentChannel set
       listToMaybe $ drop (i - 1) $ toList set
 
+resetUserInput :: AppState -> AppState
+resetUserInput st = st {appInput = emptyEditor}
+
+emptyEditor :: Editor Text ViewportName
+emptyEditor = editorText Input Nothing ""
+
 --------------------------------------------------------------------------------
 
 nickOf :: User -> Text
