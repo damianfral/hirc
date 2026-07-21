@@ -103,6 +103,9 @@ updateState ts (Disconnected reason) = \st ->
 updateState ts (MotdLine line) = appendServerChatMessage chatMsg
   where
     chatMsg = ChatMessage ts Nothing [line] Dimmed
+updateState ts (ServerMessage text) = appendServerChatMessage chatMsg
+  where
+    chatMsg = ChatMessage ts Nothing [text] Dimmed
 updateState _ _ = id
 
 --------------------------------------------------------------------------------
