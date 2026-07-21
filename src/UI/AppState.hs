@@ -3,7 +3,6 @@
 
 module UI.AppState where
 
-import Brick
 import Brick.Widgets.Edit
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -17,7 +16,6 @@ data ViewportName
   | Input
   | ChannelMembers
   | Channels
-  | Scrollable ClickableScrollbarElement ViewportName
   deriving (Show, Ord, Eq)
 
 data ChatMessage = ChatMessage

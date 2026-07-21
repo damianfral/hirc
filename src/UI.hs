@@ -62,14 +62,17 @@ handleEvent ev@(VtyEvent _) = do
   put $ st {appInput = newEditor}
 handleEvent (AppEvent event) = do
   modify $ updateState event
-  vScrollToEnd $ viewportScroll Messages
-handleEvent (MouseDown (Scrollable _element vp) direction _mods _location) = do
+  scrollMessagesToEnd
+handleEvent (MouseDown vp direction _mods _location) = do
   let scrollLines = case direction of
-        V.BScrollUp -> (-3)
-        V.BScrollDown -> 3
+        V.BScrollUp -> (-4)
+        V.BScrollDown -> 4
         _ -> 0
   vScrollBy (viewportScroll vp) scrollLines
-handleEvent _ = pure ()
+handleEvent (MouseUp {}) = pure ()
+
+scrollMessagesToEnd :: EventM ViewportName s ()
+scrollMessagesToEnd = vScrollToEnd $ viewportScroll Messages
 
 runUI :: HostName -> IRCClient -> User -> IO ()
 runUI hostname client user = do
@@ -118,9 +121,8 @@ viewChannelName :: Channel -> Widget n
 viewChannelName = txt . channelToText
 
 viewChatMessages :: [ChatMessage] -> Widget ViewportName
-viewChatMessages msgs = withClickableVScrollBars Scrollable $ do
-  withVScrollBars OnRight $ viewport Messages Vertical $ do
-    vBox $ viewChatMessage <$> msgs
+viewChatMessages msgs = withVScrollBars OnRight $ do
+  viewport Messages Vertical $ vBox $ viewChatMessage <$> msgs
 
 viewChatMessage :: ChatMessage -> Widget ViewportName
 viewChatMessage (ChatMessage Nothing msg tag) =
@@ -158,7 +160,6 @@ viewUI AppState {..} = [vBox [mainWidget, chatBar]]
               $ fromMaybe [] currentChannelMessages,
             hLimit 20
               $ borderWithLabel (txt " members ")
-              $ withClickableVScrollBars Scrollable
               $ withVScrollBars OnRight
               $ viewport ChannelMembers Vertical
               $ viewMembers
@@ -277,6 +278,7 @@ handleSendMessage text = do
         $ appendChatMessage
           (ChatMessage (Just $ nickname $ appUser st) [text] Normal)
           channel
+      scrollMessagesToEnd
 
 handleHelp :: EventM ViewportName AppState ()
 handleHelp = do
@@ -285,6 +287,7 @@ handleHelp = do
   modify $ case appCurrentChannel st of
     Nothing -> appendServerChatMessage $ ChatMessage Nothing helpMsg Dimmed
     Just channel -> appendChatMessage chatMsg channel
+  scrollMessagesToEnd
   where
     helpMsg =
       [ "Available commands:",
