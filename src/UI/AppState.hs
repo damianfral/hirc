@@ -81,7 +81,8 @@ updateState ts (NickChanged user n@(Nickname nick)) =
 updateState _ts (ChannelUsers channel nicks) =
   modifyChannel channel $ modifyChannelNicknames (nicks <>)
 updateState ts (UserDisconnected user _reason) =
-  removeNicknameFromAllChannels (nickname user) . broadcastToAllChannels chatMsg
+  removeNicknameFromAllChannels (nickname user)
+    . appendServerChatMessage chatMsg
   where
     chatText = nickOf user <> " disconnected"
     chatMsg = ChatMessage ts Nothing [chatText] Dimmed
