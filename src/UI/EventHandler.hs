@@ -6,6 +6,7 @@ module UI.EventHandler where
 
 import Brick
 import qualified Brick.Keybindings.KeyDispatcher as KD
+import Brick.Keybindings.Pretty (keybindingTextTable)
 import Brick.Widgets.Edit (applyEdit, getEditContents, handleEditorEvent)
 import qualified Data.Map as Map
 import qualified Data.Text as T
@@ -159,24 +160,26 @@ handleHelp :: EventM ViewportName AppState ()
 handleHelp = do
   st <- get
   ts <- liftIO getCurrentTime
-  let chatMsg = ChatMessage ts Nothing helpMsg Dimmed
+  let keybindingsText = keybindingTextTable keyConfig [("", keyEventHandlers)]
+      helpMsg =
+        [ "Commands",
+          "========",
+          "  /help                     - Show this help message",
+          "  /join #channel            - Join a channel",
+          "  /part                     - Leave the current channel",
+          "  /names                    - List members in the current channel",
+          "  /list                     - List available channels",
+          "  /nick <nickname>          - Change your nickname",
+          "  /topic [#channel] <topic> - View or set the channel topic",
+          "  /away [reason]            - Set yourself as away",
+          "  /quit [reason]            - Quit the application"
+        ]
+          <> T.lines keybindingsText
+      chatMsg = ChatMessage ts Nothing helpMsg Dimmed
   modify $ case appCurrentChannel st of
     Nothing -> appendServerChatMessage chatMsg
     Just channel -> appendChatMessage chatMsg channel
   scrollMessagesToEnd
-  where
-    helpMsg =
-      [ "Available commands:",
-        "  /help            - Show this help message",
-        "  /join #channel   - Join a channel",
-        "  /part            - Leave the current channel",
-        "  /names           - List members in the current channel",
-        "  /list            - List available channels",
-        "  /nick <nickname> - Change your nickname",
-        "  /topic [#channel] <topic> - View or set the channel topic",
-        "  /away [reason]   - Set yourself as away",
-        "  /quit [reason]   - Quit the application"
-      ]
 
 handleNick :: Text -> EventM ViewportName AppState ()
 handleNick msg = case T.words msg of
