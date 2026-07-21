@@ -72,7 +72,7 @@ updateState ts (UserLeft user channel reason) =
   where
     reasonText = case reason of Nothing -> ""; Just (Reason r) -> ", " <> r
     chatMsg =
-      ChatMessage ts Nothing [nickOf user <> "left ", reasonText] Dimmed
+      ChatMessage ts Nothing [nickOf user <> " left", reasonText] Dimmed
 updateState ts (NickChanged user n@(Nickname nick)) =
   updateNick (nickname user) n . broadcastToAllChannels chatMsg
   where
