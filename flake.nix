@@ -10,6 +10,10 @@
     feedback.url = "github:NorfairKing/feedback";
     sydtest.url = "github:NorfairKing/sydtest";
     opt-env-conf.url = "github:NorfairKing/opt-env-conf";
+    brick = {
+      url = "github:jtdaugherty/brick";
+      flake = false;
+    };
   };
 
   outputs = {
@@ -58,6 +62,7 @@
               final.lib.composeExtensions
               (old.overrides or (_: _: {}))
               (self: super: {
+                brick = self.callCabal2nix "brick" inputs.brick {};
                 hirc =
                   self.generateOptparseApplicativeCompletions ["hirc"]
                   (self.callCabal2nix "hirc" src {});
