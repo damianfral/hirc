@@ -17,8 +17,8 @@ import IRC.Protocol (Nickname (..), User (..))
 import Relude
 import UI.AppState
 
-channelSelectedAttr :: AttrName
-channelSelectedAttr = attrName "channelSelected"
+channelNotSelectedAttr :: AttrName
+channelNotSelectedAttr = attrName "channelNotSelected"
 
 dimmedAttr :: AttrName
 dimmedAttr = attrName "dimmed"
@@ -45,9 +45,8 @@ viewChannels chans current = vBox $ if Map.null chans then [] else names
   where
     names =
       [ let isSelected = Just k == current
-            name = channelToText k
-            w = txt name
-         in if isSelected then withAttr channelSelectedAttr w else w
+            w = txt $ channelToText k
+         in if isSelected then w else withAttr channelNotSelectedAttr w
       | (k, _v) <- Map.toList chans
       ]
 

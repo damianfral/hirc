@@ -27,7 +27,7 @@ uiApp =
     }
   where
     attributes =
-      [ (channelSelectedAttr, V.defAttr `V.withStyle` V.bold),
+      [ (channelNotSelectedAttr, V.defAttr `V.withStyle` V.dim),
         (dimmedAttr, V.defAttr `V.withStyle` V.dim)
       ]
         <> do
