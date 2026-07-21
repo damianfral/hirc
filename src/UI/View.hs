@@ -37,12 +37,15 @@ nicknameToColorAttr :: Nickname -> AttrName
 nicknameToColorAttr nick =
   nicknameColorAttr $ nicknameHash nick `mod` length nicknameColors
 
+padX :: Int -> Widget n -> Widget n
+padX x = padLeft (Pad x) . padRight (Pad x)
+
 viewChannels :: Map Channel ChannelState -> Maybe Channel -> Widget ViewportName
 viewChannels chans current = vBox $ if Map.null chans then [] else names
   where
     names =
       [ let isSelected = Just k == current
-            name = "  " <> channelToText k
+            name = channelToText k
             w = txt name
          in if isSelected then withAttr channelSelectedAttr w else w
       | (k, _v) <- Map.toList chans
@@ -63,9 +66,9 @@ viewChatMessages msgs = withVScrollBars OnRight $ do
 
 viewChatMessage :: ChatMessage -> Widget ViewportName
 viewChatMessage (ChatMessage ts Nothing msg tag) = withTagAttrs tag $ do
-  hBox [viewTime ts, txt " ", viewChatMessageContent msg]
+  hBox [viewTime ts, padLeft (Pad 1) $ viewChatMessageContent msg]
 viewChatMessage (ChatMessage ts (Just nick) msg tag) = withTagAttrs tag $ do
-  hBox [viewTime ts, viewNickname nick, viewChatMessageContent msg]
+  hBox [viewTime ts, padX 1 $ viewNickname nick, viewChatMessageContent msg]
 
 withTagAttrs :: Tag -> Widget n -> Widget n
 withTagAttrs Dimmed w = withAttr dimmedAttr w
@@ -77,12 +80,8 @@ viewChatMessageContent = vBox . fmap txtWrap
 viewNickname :: Nickname -> Widget n
 viewNickname nick =
   let (Nickname nickStr) = nick
-   in hLimit (T.length nickStr + 4)
-        $ withAttr (nicknameToColorAttr nick)
-        $ txt
-        $ " <"
-        <> nickStr
-        <> "> "
+   in hLimit (T.length nickStr + 4) $ withAttr (nicknameToColorAttr nick) $ do
+        txt $ "<" <> nickStr <> ">"
 
 viewTime :: UTCTime -> Widget n
 viewTime ts =
@@ -129,6 +128,6 @@ viewUI AppState {..} = [vBox [mainWidget, chatBar]]
       pure $ channelNicknames uiChann
     chatBar =
       vLimit (2 + length (getEditContents appInput)) $ border $ hBox $ do
-        [viewNickname $ nickname appUser, inputWidget]
+        [viewNickname $ nickname appUser, padLeft (Pad 1) inputWidget]
     inputWidget = renderEditor viewEditorLines True appInput
     viewEditorLines = txt . T.unlines
