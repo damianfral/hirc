@@ -52,6 +52,7 @@ data Event
   | ChannelListEntry Channel Int Text
   | Disconnected Text
   | TopicReceived Channel Text
+  | MotdLine Text
   deriving (Show, Eq)
 
 actionToMessages :: Action -> [Message]
@@ -130,6 +131,9 @@ messageToEvent
 messageToEvent
   (Message (Just (PrefixServer _)) (Numeric 332) (Params (_ : ch : topic))) =
     Just $ TopicReceived (textToChannel ch) (T.unwords topic)
+messageToEvent
+  (Message (Just (PrefixServer _)) (Numeric 372) (Params (_ : line : _))) =
+    Just $ MotdLine line
 messageToEvent _ = Nothing
 
 parseNames :: Text -> Set Nickname

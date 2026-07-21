@@ -100,6 +100,9 @@ updateState ts (Disconnected reason) = \st ->
       chatText = nickTxt <> " disconnected, " <> reason
       chatMsg = ChatMessage ts Nothing [chatText] Dimmed
    in removeNicknameFromAllChannels nick $ broadcastToAllChannels chatMsg st
+updateState ts (MotdLine line) = appendServerChatMessage chatMsg
+  where
+    chatMsg = ChatMessage ts Nothing [line] Dimmed
 updateState _ _ = id
 
 --------------------------------------------------------------------------------
