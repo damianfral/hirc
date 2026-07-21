@@ -13,7 +13,7 @@ import Data.GenValidity.Text ()
 import Data.List (unsnoc)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
-import Relude hiding (atomically)
+import Relude
 import Test.QuickCheck (Gen, choose, elements, oneof)
 
 -- | A raw IRC message as it travels over the wire (RFC 1459 / RFC 2812).

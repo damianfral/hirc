@@ -5,8 +5,8 @@ module UI.CLI where
 
 import Data.Version (showVersion)
 import IRC.Client
-import IRC.Domain
-import IRC.Protocol
+import IRC.Domain (Realname (..))
+import IRC.Protocol (Nickname (..), User (..), Username (..))
 import Network.Socket (HostName, ServiceName)
 import Options.Applicative
 import Paths_hirc (version)

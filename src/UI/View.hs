@@ -91,30 +91,24 @@ viewUI :: AppState -> [Widget ViewportName]
 viewUI AppState {..} = [vBox [mainWidget, chatBar]]
   where
     channelListWidget =
-      hLimit 20
-        $ borderWithLabel (txt " channels ")
-        $ withVScrollBars OnRight
-        $ viewport Channels Vertical
-        $ viewChannels appChannels appCurrentChannel
+      hLimit 20 $ borderWithLabel (txt " channels ") $ do
+        withVScrollBars OnRight $ viewport Channels Vertical $ do
+          viewChannels appChannels appCurrentChannel
     mainWidget = case appCurrentChannel of
       Nothing ->
         hBox
           [ channelListWidget,
-            borderWithLabel (txt $ " " <> appHost <> " ")
+            borderWithLabel (padX 1 $ txt appHost)
               $ viewChatMessages appHostMessages
           ]
       Just channel ->
         hBox
           [ channelListWidget,
-            borderWithLabel (viewChannelName channel)
-              $ viewChatMessages
-              $ fromMaybe [] currentChannelMessages,
-            hLimit 20
-              $ borderWithLabel (txt " members ")
-              $ withVScrollBars OnRight
-              $ viewport ChannelMembers Vertical
-              $ viewMembers
-              $ fromMaybe mempty currentChannelNicknames
+            borderWithLabel (padX 1 $ viewChannelName channel) $ do
+              viewChatMessages $ fromMaybe [] currentChannelMessages,
+            hLimit 20 $ borderWithLabel (padX 1 $ txt "members") $ do
+              withVScrollBars OnRight $ viewport ChannelMembers Vertical $ do
+                viewMembers $ fromMaybe mempty currentChannelNicknames
           ]
     currentChannelMessages = case appCurrentChannel of
       Nothing -> Just appHostMessages
