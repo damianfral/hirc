@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module UI.View where
 
@@ -10,6 +11,7 @@ import qualified Data.Map as Map
 import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
+import Graphics.Vty
 import IRC.Domain
 import IRC.Protocol (Nickname (..), User (..))
 import Relude
@@ -20,6 +22,20 @@ channelSelectedAttr = attrName "channelSelected"
 
 dimmedAttr :: AttrName
 dimmedAttr = attrName "dimmed"
+
+nicknameColors :: [Color]
+nicknameColors =
+  [brightRed, brightGreen, brightYellow, brightBlue, brightMagenta, brightCyan]
+
+nicknameColorAttr :: Int -> AttrName
+nicknameColorAttr i = attrName $ "nicknameColor" <> show i
+
+nicknameHash :: Nickname -> Int
+nicknameHash (Nickname nick) = T.foldl' (\h c -> h * 31 + fromEnum c) 0 nick
+
+nicknameToColorAttr :: Nickname -> AttrName
+nicknameToColorAttr nick =
+  nicknameColorAttr $ nicknameHash nick `mod` length nicknameColors
 
 viewChannels :: Map Channel ChannelState -> Maybe Channel -> Widget ViewportName
 viewChannels chans current = vBox $ if Map.null chans then [] else names
@@ -33,7 +49,10 @@ viewChannels chans current = vBox $ if Map.null chans then [] else names
       ]
 
 viewMembers :: Set Nickname -> Widget ViewportName
-viewMembers nicks = vBox $ txt . unNickname <$> toList nicks
+viewMembers nicks = vBox $ viewColoredNickname <$> toList nicks
+  where
+    viewColoredNickname nick =
+      withAttr (nicknameToColorAttr nick) $ txt $ unNickname nick
 
 viewChannelName :: Channel -> Widget n
 viewChannelName = txt . channelToText
@@ -57,8 +76,14 @@ viewChatMessageContent :: [Text] -> Widget n
 viewChatMessageContent = vBox . fmap txtWrap
 
 viewNickname :: Nickname -> Widget n
-viewNickname (Nickname nick) = hLimit (T.length nick + 4) $ do
-  txt $ " <" <> nick <> "> "
+viewNickname nick =
+  let (Nickname nickStr) = nick
+   in hLimit (T.length nickStr + 4)
+        $ withAttr (nicknameToColorAttr nick)
+        $ txt
+        $ " <"
+        <> nickStr
+        <> "> "
 
 viewTime :: UTCTime -> Widget n
 viewTime ts =
@@ -69,30 +94,30 @@ viewUI :: AppState -> [Widget ViewportName]
 viewUI AppState {..} = [vBox [mainWidget, chatBar]]
   where
     channelListWidget =
-      hLimit 20 $
-        borderWithLabel (txt " channels ") $
-          withVScrollBars OnRight $
-            viewport Channels Vertical $
-              viewChannels appChannels appCurrentChannel
+      hLimit 20
+        $ borderWithLabel (txt " channels ")
+        $ withVScrollBars OnRight
+        $ viewport Channels Vertical
+        $ viewChannels appChannels appCurrentChannel
     mainWidget = case appCurrentChannel of
       Nothing ->
         hBox
           [ channelListWidget,
-            borderWithLabel (txt $ " " <> appHost <> " ") $
-              viewChatMessages appHostMessages
+            borderWithLabel (txt $ " " <> appHost <> " ")
+              $ viewChatMessages appHostMessages
           ]
       Just channel ->
         hBox
           [ channelListWidget,
-            borderWithLabel (viewChannelName channel) $
-              viewChatMessages $
-                fromMaybe [] currentChannelMessages,
-            hLimit 20 $
-              borderWithLabel (txt " members ") $
-                withVScrollBars OnRight $
-                  viewport ChannelMembers Vertical $
-                    viewMembers $
-                      fromMaybe mempty currentChannelNicknames
+            borderWithLabel (viewChannelName channel)
+              $ viewChatMessages
+              $ fromMaybe [] currentChannelMessages,
+            hLimit 20
+              $ borderWithLabel (txt " members ")
+              $ withVScrollBars OnRight
+              $ viewport ChannelMembers Vertical
+              $ viewMembers
+              $ fromMaybe mempty currentChannelNicknames
           ]
     currentChannelMessages = case appCurrentChannel of
       Nothing -> Just appHostMessages

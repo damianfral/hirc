@@ -30,6 +30,9 @@ uiApp =
       [ (channelSelectedAttr, V.defAttr `V.withStyle` V.bold),
         (dimmedAttr, V.defAttr `V.withStyle` V.dim)
       ]
+        <> do
+          (i, color) <- zip [0 ..] nicknameColors
+          [(nicknameColorAttr i, V.defAttr {V.attrForeColor = V.SetTo color})]
 
 runUI :: HostName -> IRCClient -> User -> IO ()
 runUI hostname client user = do
