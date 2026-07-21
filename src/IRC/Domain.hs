@@ -109,7 +109,7 @@ messageToEvent
 messageToEvent (Message (Just (PrefixUser u)) JOIN (Params [channel])) =
   Just $ UserJoined u $ textToChannel channel
 messageToEvent (Message (Just (PrefixUser u)) PART (Params (ch : reason))) =
-  Just $ UserLeft u (Channel ch) (Reason <$> listToMaybe reason)
+  Just $ UserLeft u (textToChannel ch) (Reason <$> listToMaybe reason)
 messageToEvent (Message (Just (PrefixUser u)) PRIVMSG (Params (target : msg))) =
   Just $ MessageReceived u (parseTarget target) (T.unwords msg)
 messageToEvent (Message (Just (PrefixUser u)) NOTICE (Params (target : msg))) =
