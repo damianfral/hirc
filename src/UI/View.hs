@@ -68,9 +68,8 @@ viewChatMessage (ChatMessage ts (Just nick) msg tag) = withTagAttrs tag $ do
   hBox [viewTime ts, viewNickname nick, viewChatMessageContent msg]
 
 withTagAttrs :: Tag -> Widget n -> Widget n
-withTagAttrs tag w = case tag of
-  Dimmed -> withAttr dimmedAttr w
-  _ -> w
+withTagAttrs Dimmed w = withAttr dimmedAttr w
+withTagAttrs _ w = w
 
 viewChatMessageContent :: [Text] -> Widget n
 viewChatMessageContent = vBox . fmap txtWrap
