@@ -8,6 +8,8 @@ import Brick.Widgets.Border (border, borderWithLabel)
 import Brick.Widgets.Edit (renderEditor)
 import qualified Data.Map as Map
 import qualified Data.Text as T
+import Data.Time (UTCTime)
+import Data.Time.Format (defaultTimeLocale, formatTime)
 import IRC.Domain
 import IRC.Protocol (Nickname (..), User (..))
 import Relude
@@ -41,16 +43,27 @@ viewChatMessages msgs = withVScrollBars OnRight $ do
   viewport Messages Vertical $ vBox $ viewChatMessage <$> msgs
 
 viewChatMessage :: ChatMessage -> Widget ViewportName
-viewChatMessage (ChatMessage Nothing msg tag) =
-  let w = vBox $ txt <$> msg
-   in case tag of
-        Dimmed -> withAttr dimmedAttr w
-        _ -> w
-viewChatMessage (ChatMessage (Just (Nickname nick)) msg tag) =
-  let w = hBox [txtWrap $ T.concat $ [nick, ": "] <> msg]
-   in case tag of
-        Dimmed -> withAttr dimmedAttr w
-        _ -> w
+viewChatMessage (ChatMessage ts Nothing msg tag) = withTagAttrs tag $ do
+  hBox [viewTime ts, txt " ", viewChatMessageContent msg]
+viewChatMessage (ChatMessage ts (Just nick) msg tag) = withTagAttrs tag $ do
+  hBox [viewTime ts, viewNickname nick, viewChatMessageContent msg]
+
+withTagAttrs :: Tag -> Widget n -> Widget n
+withTagAttrs tag w = case tag of
+  Dimmed -> withAttr dimmedAttr w
+  _ -> w
+
+viewChatMessageContent :: [Text] -> Widget n
+viewChatMessageContent = vBox . fmap txtWrap
+
+viewNickname :: Nickname -> Widget n
+viewNickname (Nickname nick) = hLimit (T.length nick + 4) $ do
+  txt $ " <" <> nick <> "> "
+
+viewTime :: UTCTime -> Widget n
+viewTime ts =
+  let tsStr = T.pack $ formatTime defaultTimeLocale "%H:%M" ts
+   in hLimit 7 $ txt $ "[" <> tsStr <> "]"
 
 viewUI :: AppState -> [Widget ViewportName]
 viewUI AppState {..} = [vBox [mainWidget, chatBar]]
@@ -91,6 +104,6 @@ viewUI AppState {..} = [vBox [mainWidget, chatBar]]
       uiChann <- Map.lookup chanName appChannels
       pure $ channelNicknames uiChann
     chatBar = vLimit 3 $ border $ hBox $ do
-      [str $ toString $ (nickname appUser & unNickname) <> ": ", inputWidget]
+      [viewNickname $ nickname appUser, inputWidget]
     inputWidget = renderEditor viewEditorLines True appInput
     viewEditorLines = txt . T.unlines

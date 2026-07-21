@@ -6,6 +6,7 @@ module UI.AppState where
 import Brick.Widgets.Edit
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import Data.Time.Clock (UTCTime)
 import IRC.Client
 import IRC.Domain
 import IRC.Protocol
@@ -19,7 +20,8 @@ data ViewportName
   deriving (Show, Ord, Eq)
 
 data ChatMessage = ChatMessage
-  { -- | Nothing for nmessages comming from server
+  { chatMessageTime :: UTCTime,
+    -- | Nothing for nmessages comming from server
     chatMessageFrom :: Maybe Nickname,
     chatMessageContent :: [Text],
     chatMessageTag :: Tag
@@ -49,55 +51,55 @@ data AppState = AppState
     appInput :: Editor Text ViewportName
   }
 
-updateState :: Event -> AppState -> AppState
-updateState (Connected server _welcome) = appendServerChatMessage chatMsg
+updateState :: UTCTime -> Event -> AppState -> AppState
+updateState ts (Connected (Server server) _welcome) = appendServerChatMessage chatMsg
   where
-    chatMsg = ChatMessage Nothing ["Connected to " <> show server] Dimmed
-updateState (MessageReceived user (TargetChannel channel) msg) =
-  appendChatMessage (ChatMessage (Just $ nickname user) (lines msg) Normal) channel
-updateState (NoticeReceived user (TargetChannel channel) msg) =
+    chatMsg = ChatMessage ts Nothing ["Connected to " <> server] Dimmed
+updateState ts (MessageReceived user (TargetChannel channel) msg) =
+  appendChatMessage (ChatMessage ts (Just $ nickname user) (lines msg) Normal) channel
+updateState ts (NoticeReceived user (TargetChannel channel) msg) =
   appendChatMessage chatMsg channel
   where
-    chatMsg = ChatMessage (Just $ nickname user) (lines msg) Dimmed
-updateState (UserJoined user channel) =
+    chatMsg = ChatMessage ts (Just $ nickname user) (lines msg) Dimmed
+updateState ts (UserJoined user channel) =
   appendChatMessage chatMsg channel
     . addNicknameToChannel (nickname user) channel
   where
-    chatMsg = ChatMessage Nothing [nickOf user <> " joined"] Dimmed
-updateState (UserLeft user channel reason) =
+    chatMsg = ChatMessage ts Nothing [nickOf user <> " joined"] Dimmed
+updateState ts (UserLeft user channel reason) =
   appendChatMessage chatMsg channel
     . addNicknameToChannel (nickname user) channel
   where
     reasonText = case reason of Nothing -> ""; Just (Reason r) -> ", " <> r
     chatMsg =
-      ChatMessage Nothing [nickOf user <> "left ", reasonText] Dimmed
-updateState (NickChanged user n@(Nickname nick)) =
+      ChatMessage ts Nothing [nickOf user <> "left ", reasonText] Dimmed
+updateState ts (NickChanged user n@(Nickname nick)) =
   updateNick (nickname user) n . broadcastToAllChannels chatMsg
   where
     chatText = nickOf user <> " is now known as " <> nick
-    chatMsg = ChatMessage Nothing [chatText] Dimmed
-updateState (UserDisconnected user _reason) =
+    chatMsg = ChatMessage ts Nothing [chatText] Dimmed
+updateState _ts (ChannelUsers channel nicks) =
+  modifyChannel channel $ modifyChannelNicknames (nicks <>)
+updateState ts (UserDisconnected user _reason) =
   removeNicknameFromAllChannels (nickname user) . broadcastToAllChannels chatMsg
   where
     chatText = nickOf user <> " disconnected"
-    chatMsg = ChatMessage Nothing [chatText] Dimmed
-updateState (ChannelUsers channel nicks) =
-  modifyChannel channel $ modifyChannelNicknames (nicks <>)
-updateState (ChannelListEntry channel count topic) =
+    chatMsg = ChatMessage ts Nothing [chatText] Dimmed
+updateState ts (ChannelListEntry channel count topic) =
   appendChatMessage chatMsg channel
   where
     countTxt = "(" <> show count <> " users)"
     chatTxts = [unwords ["[LIST] " <> channelToText channel, countTxt, topic]]
-    chatMsg = ChatMessage Nothing chatTxts Dimmed
-updateState (TopicReceived channel topic) = appendChatMessage chatMsg channel
+    chatMsg = ChatMessage ts Nothing chatTxts Dimmed
+updateState ts (TopicReceived channel topic) = appendChatMessage chatMsg channel
   where
-    chatMsg = ChatMessage Nothing ["[TOPIC] " <> topic] Dimmed
-updateState (Disconnected reason) = \st ->
+    chatMsg = ChatMessage ts Nothing ["[TOPIC] " <> topic] Dimmed
+updateState ts (Disconnected reason) = \st ->
   let nick@(Nickname nickTxt) = nickname $ appUser st
       chatText = nickTxt <> " disconnected, " <> reason
-      chatMsg = ChatMessage Nothing [chatText] Dimmed
+      chatMsg = ChatMessage ts Nothing [chatText] Dimmed
    in removeNicknameFromAllChannels nick $ broadcastToAllChannels chatMsg st
-updateState _ = id
+updateState _ _ = id
 
 --------------------------------------------------------------------------------
 

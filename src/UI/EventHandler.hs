@@ -9,6 +9,7 @@ import qualified Brick.Keybindings.KeyDispatcher as KD
 import Brick.Widgets.Edit (getEditContents, handleEditorEvent)
 import qualified Data.Map as Map
 import qualified Data.Text as T
+import Data.Time.Clock (getCurrentTime)
 import qualified Graphics.Vty as V
 import IRC.Client
 import IRC.Domain
@@ -30,7 +31,8 @@ handleEvent (VtyEvent k@(V.EvKey key mods)) = do
       Just kd -> KD.handleKey kd key mods
 handleEvent (VtyEvent _) = pure ()
 handleEvent (AppEvent event) = do
-  modify $ updateState event
+  ts <- liftIO getCurrentTime
+  modify $ updateState ts event
   scrollMessagesToEnd
 handleEvent (MouseDown vp direction _mods _location) = do
   let scrollLines = case direction of
@@ -143,18 +145,20 @@ handleSendMessage text = do
       let target = TargetChannel channel
       liftIO $ writeAction (appClient st) $ SendMessage target text
       -- Since we have not implemented echo-message, just append the message.
+      ts <- liftIO getCurrentTime
       modify
         $ appendChatMessage
-          (ChatMessage (Just $ nickname $ appUser st) [text] Normal)
+          (ChatMessage ts (Just $ nickname $ appUser st) [text] Normal)
           channel
       scrollMessagesToEnd
 
 handleHelp :: EventM ViewportName AppState ()
 handleHelp = do
   st <- get
-  let chatMsg = ChatMessage Nothing helpMsg Dimmed
+  ts <- liftIO getCurrentTime
+  let chatMsg = ChatMessage ts Nothing helpMsg Dimmed
   modify $ case appCurrentChannel st of
-    Nothing -> appendServerChatMessage $ ChatMessage Nothing helpMsg Dimmed
+    Nothing -> appendServerChatMessage chatMsg
     Just channel -> appendChatMessage chatMsg channel
   scrollMessagesToEnd
   where
@@ -177,7 +181,8 @@ handleNick msg = case T.words msg of
     st <- get
     liftIO $ writeAction (appClient st) $ SetNickname (Nickname nick)
   _ -> do
-    let chatMsg = ChatMessage Nothing ["Usage: /nick <nickname>"] Dimmed
+    ts <- liftIO getCurrentTime
+    let chatMsg = ChatMessage ts Nothing ["Usage: /nick <nickname>"] Dimmed
     modify $ appendServerChatMessage chatMsg
 
 handleAway :: Text -> EventM ViewportName AppState ()
@@ -205,7 +210,8 @@ handleTopic msg = do
           _ -> Nothing
   case mAction of
     Nothing -> do
+      ts <- liftIO getCurrentTime
       let chatMsg =
-            ChatMessage Nothing ["Usage: /topic [#channel] <topic>"] Dimmed
+            ChatMessage ts Nothing ["Usage: /topic [#channel] <topic>"] Dimmed
       modify $ appendServerChatMessage chatMsg
     Just action -> liftIO $ writeAction appClient action
