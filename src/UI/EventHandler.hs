@@ -91,6 +91,7 @@ handleEnter = do
       | "/nick" `T.isPrefixOf` msg -> handleNick msg
       | "/away" `T.isPrefixOf` msg -> handleAway msg
       | "/topic" `T.isPrefixOf` msg -> handleTopic msg
+      | "/notice" `T.isPrefixOf` msg -> handleNotice msg
       | "/quit" `T.isPrefixOf` msg -> handleQuit msg
       | otherwise -> handleSendMessage msg
   modify resetUserInput
@@ -156,6 +157,22 @@ handleSendMessage text = do
           channel
       scrollMessagesToEnd
 
+handleNotice :: Text -> EventM ViewportName AppState ()
+handleNotice msg = case T.strip $ T.drop (T.length "/notice") msg of
+  "" -> pure ()
+  strippedMsg -> do
+    st <- get
+    case appCurrentChannel st of
+      Nothing -> pure ()
+      Just channel -> do
+        let target = TargetChannel channel
+        liftIO $ writeAction (appClient st) $ SendNotice target strippedMsg
+        ts <- liftIO getCurrentTime
+        let nick = nickname $ appUser st
+        let chatMsg = ChatMessage ts (Just nick) [strippedMsg] Dimmed
+        modify $ appendChatMessage chatMsg channel
+        scrollMessagesToEnd
+
 handleHelp :: EventM ViewportName AppState ()
 handleHelp = do
   st <- get
@@ -170,6 +187,7 @@ handleHelp = do
           "  /names                    - List members in the current channel",
           "  /list                     - List available channels",
           "  /nick <nickname>          - Change your nickname",
+          "  /notice <message>         - Send a notice to the current channel",
           "  /topic [#channel] <topic> - View or set the channel topic",
           "  /away [reason]            - Set yourself as away",
           "  /quit [reason]            - Quit the application"
