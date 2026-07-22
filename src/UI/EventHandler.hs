@@ -147,7 +147,9 @@ handleNames = do
   st <- get
   case appCurrentChannel st of
     Nothing -> pure ()
-    Just channel -> liftIO $ writeAction (appClient st) (ListMembers channel)
+    Just channel -> do
+      liftIO $ writeAction (appClient st) (ListMembers channel)
+      modify $ modifyChannel channel $ \ch -> ch {channelNicknames = mempty}
 
 handleQuit :: Maybe Reason -> EventM ViewportName AppState ()
 handleQuit mReason = do
