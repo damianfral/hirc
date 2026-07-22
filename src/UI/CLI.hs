@@ -18,7 +18,8 @@ data Options = Options
     username :: Username,
     realname :: Realname,
     host :: HostName,
-    port :: ServiceName,
+    port :: Maybe ServiceName,
+    noTls :: ConnectionMode,
     logFile :: Maybe FilePath
   }
 
@@ -43,14 +44,18 @@ hostParser =
     <> value "irc.libera.chat"
     <> showDefault
 
-portParser :: Parser ServiceName
+portParser :: Parser (Maybe ServiceName)
 portParser =
-  strOption
+  optional
+    $ strOption
     $ long "port"
     <> help "IRC server port"
     <> metavar "PORT"
-    <> value "6667"
     <> showDefault
+
+connectionModeParser :: Parser ConnectionMode
+connectionModeParser =
+  fromMaybe TLS <$> optional (flag' Plaintext $ long "no-tls")
 
 logFileParser :: Parser (Maybe FilePath)
 logFileParser = optional $ strOption $ do
@@ -64,6 +69,7 @@ optionsParser =
     <*> realnameParser
     <*> hostParser
     <*> portParser
+    <*> connectionModeParser
     <*> logFileParser
 
 runCLI :: IO ()
@@ -76,7 +82,13 @@ runCLI = execParser opts >>= runCLIOptions
         <> progDesc "Haskell IRC client"
 
 runCLIOptions :: Options -> IO ()
-runCLIOptions (Options nick user real hostname p logPath) =
-  withIRCClient (IRCClientSettings hostname p logPath) $ \client -> do
-    writeAction client $ Register nick user real
-    runUI hostname client $ User nick Nothing Nothing
+runCLIOptions (Options nick user real hostname p connectionMode logPath) =
+  withIRCClient (IRCClientSettings hostname port' connectionMode logPath)
+    $ \client -> do
+      writeAction client $ Register nick user real
+      runUI hostname client $ User nick Nothing Nothing
+  where
+    connPort = case connectionMode of
+      Plaintext -> "6667"
+      TLS -> "6697"
+    port' = fromMaybe connPort p

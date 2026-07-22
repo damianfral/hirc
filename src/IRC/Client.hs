@@ -7,6 +7,7 @@ module IRC.Client
     withIRCClient,
     IRCClientSettings (..),
     IRCClient,
+    ConnectionMode (..),
     Action (..),
     Event (..),
   )
@@ -21,15 +22,15 @@ import qualified Data.Text as T
 import IRC.Domain
 import IRC.Protocol
 import IRC.SocketLogger
-import Network.Socket (AddrInfo (..), HostName, ServiceName, Socket, SocketType (..), close, connect, defaultHints, getAddrInfo, openSocket)
-import Network.Socket.ByteString
+import IRC.Transport (Transport (..), makePlainTransport, makeTLSTransport)
+import Network.Socket (AddrInfo (..), HostName, ServiceName, SocketType (..), connect, defaultHints, getAddrInfo, openSocket)
 import Relude hiding (atomically)
 import System.IO.Error (userError)
 
 data IRCClient = IRCClient {actions :: TBQueue Action, events :: TBQueue Event}
 
 data IRCState = IRCState
-  { socket :: Socket,
+  { transport :: Transport,
     client :: IRCClient,
     connectionThread :: Async ()
   }
@@ -46,18 +47,18 @@ writeEvent IRCClient {events = evts} = atomically . writeTBQueue evts
 readEvent :: IRCClient -> IO Event
 readEvent IRCClient {events = evts} = atomically $ readTBQueue evts
 
-initIRCState :: Socket -> SocketLogger -> IRCClient -> IO IRCState
-initIRCState sock logger cli = do
+initIRCState :: Transport -> SocketLogger -> IRCClient -> IO IRCState
+initIRCState tr logger cli = do
   thread <- async $ do
     result <- try $ concurrently_ sendLoop (receiveLoop "")
     case result of
       Left err -> writeEvent cli $ Disconnected $ show (err :: IOException)
       Right _ -> pure ()
-  pure $ IRCState sock cli thread
+  pure $ IRCState tr cli thread
   where
     sendMessage message = do
       let encodedMessage = encodeMessage message
-      sendAll sock $ encodeUtf8 encodedMessage
+      transportSend tr $ encodeUtf8 encodedMessage
       logOutgoing logger encodedMessage
 
     sendLoop = forever $ do
@@ -65,10 +66,9 @@ initIRCState sock logger cli = do
       let messages = actionToMessages action
       forM_ messages sendMessage
     receiveLoop acc = do
-      bytes <- recv sock 4096
-      -- 0 bytes means the server has closed the connection (FIN).
+      bytes <- transportRecv tr 4096
       if BS.null bytes
-        then throwIO $ userError "connection closed by server" -- IOException
+        then throwIO $ userError "connection closed by server"
         else do
           let text = acc <> decodeUtf8With lenientDecode bytes
           let (raw, remaining) = T.breakOnEnd "\r\n" text
@@ -82,20 +82,26 @@ initIRCState sock logger cli = do
               Just message -> for_ (messageToEvent message) (writeEvent cli)
           receiveLoop remaining
 
-data IRCClientSettings = IRCClientSettings HostName ServiceName (Maybe FilePath)
+data ConnectionMode = TLS | Plaintext
+
+data IRCClientSettings
+  = IRCClientSettings HostName ServiceName ConnectionMode (Maybe FilePath)
 
 withIRCClient :: IRCClientSettings -> (IRCClient -> IO a) -> IO a
-withIRCClient (IRCClientSettings hostname port mLogFile) run =
+withIRCClient (IRCClientSettings hostname port connectionMode mLogFile) run =
   withSocketLogger mLogFile $ \logger ->
-    bracket (acquireSocket logger) releaseSocket $ run . client
+    bracket (acquireConnection logger) releaseConnection $ run . client
   where
     hints = defaultHints {addrSocketType = Stream}
-    acquireSocket logger = do
+    acquireConnection logger = do
       addr <- NE.head <$> getAddrInfo (Just hints) (Just hostname) (Just port)
       sock <- openSocket addr
       connect sock $ addrAddress addr
+      transport' <- case connectionMode of
+        TLS -> makeTLSTransport sock hostname
+        Plaintext -> pure $ makePlainTransport sock
       cli <- IRCClient <$> newTBQueueIO 32 <*> newTBQueueIO 32
-      initIRCState sock logger cli
-    releaseSocket IRCState {connectionThread = t, socket = s} = do
+      initIRCState transport' logger cli
+    releaseConnection IRCState {connectionThread = t, transport = tr} = do
       cancel t
-      close s
+      transportClose tr

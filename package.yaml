@@ -42,6 +42,7 @@ library:
     - text
     - text-zipper
     - time
+    - tls
     - vty
     - vty-crossplatform
 
