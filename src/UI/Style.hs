@@ -8,7 +8,7 @@ import Graphics.Vty
 import qualified Graphics.Vty.Attributes as V
 import IRC.Protocol (Nickname (..))
 import Relude
-import UI.AppState (Tag (..))
+import UI.Chat (Tag (..))
 
 attributes :: [(AttrName, Attr)]
 attributes =

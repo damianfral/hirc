@@ -79,7 +79,7 @@ instance Monoid Params where mempty = Params mempty
 
 -- | An IRC server name, e.g. @irc.libera.chat@ or @*.net@.
 newtype Server = Server Text
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Ord, Generic)
 
 -- | An IRC user, identified by 'Nickname', optional 'Username' (ident), and
 -- optional hostname. Only 'nickname' is guaranteed to be present.

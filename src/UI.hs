@@ -6,6 +6,7 @@ import Brick
 import qualified Brick.AttrMap as A
 import Brick.BChan (BChan, newBChan, writeBChan)
 import Control.Concurrent.Async (async, cancel)
+import qualified Data.Map as Map
 import qualified Graphics.Vty as V
 import Graphics.Vty.CrossPlatform (mkVty)
 import IRC.Client
@@ -13,6 +14,7 @@ import IRC.Protocol (Server (..), User (..))
 import Network.Socket (HostName)
 import Relude
 import UI.AppState
+import UI.Chat (Chat (Chat), ChatID (ChatWithServer))
 import UI.EventHandler (handleEvent)
 import UI.Style (attributes)
 import UI.View
@@ -39,14 +41,14 @@ runUI hostname client user = do
       v <- mkVty V.defaultConfig
       V.setMode (V.outputIface v) V.Mouse True -- mouse support
       pure v
+    server = Server $ fromString hostname
     initialState =
       AppState
         { appClient = client,
           appUser = user,
-          appConversationView = ServerView,
-          appChannels = mempty,
-          appHostMessages = [],
-          appServer = Server $ fromString hostname,
+          appCurrentChat = ChatWithServer server,
+          appChats = Map.singleton (ChatWithServer server) (Chat mempty mempty 0),
+          appServer = server,
           appInput = emptyEditor
         }
 

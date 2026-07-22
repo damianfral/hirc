@@ -9,7 +9,6 @@ import qualified Brick.Keybindings.KeyDispatcher as KD
 import Brick.Keybindings.Pretty (keybindingTextTable)
 import Brick.Widgets.Edit (applyEdit, getEditContents, handleEditorEvent)
 import qualified Data.Map as Map
-import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Text.Zipper (breakLine)
 import Data.Time.Clock (getCurrentTime)
@@ -19,6 +18,7 @@ import IRC.Domain
 import IRC.Protocol (Nickname (..), User (..))
 import Relude
 import UI.AppState
+import UI.Chat
 import UI.KeyEvent
 
 handleEvent :: BrickEvent ViewportName Event -> EventM ViewportName AppState ()
@@ -39,11 +39,10 @@ handleEvent (AppEvent event) = do
   ts <- liftIO getCurrentTime
   modify $ updateState ts event
   scrollMessagesToEnd
-handleEvent (MouseDown vp direction _mods _location) =
-  case direction of
-    V.BScrollUp -> handleScroll vp Brick.Up
-    V.BScrollDown -> handleScroll vp Brick.Down
-    _ -> pure ()
+handleEvent (MouseDown vp direction _mods _location) = case direction of
+  V.BScrollUp -> handleScroll vp Brick.Up
+  V.BScrollDown -> handleScroll vp Brick.Down
+  _ -> pure ()
 handleEvent (MouseUp {}) = pure ()
 
 scrollMessagesToEnd :: EventM ViewportName s ()
@@ -65,9 +64,9 @@ keyEventHandlers =
     KD.onEvent EvScrollDown "Scroll messages down" $ do
       handleScroll Messages Brick.Down,
     KD.onEvent EvNextChannel "Go to next channel" $ do
-      modify goToNextChannel >> scrollMessagesToEnd,
+      modify goToNextChat >> scrollMessagesToEnd,
     KD.onEvent EvPrevChannel "Go to previous channel" $ do
-      modify goToPrevChannel >> scrollMessagesToEnd,
+      modify goToPrevChat >> scrollMessagesToEnd,
     KD.onEvent EvActivate "Send message or run command" handleEnter
   ]
 
@@ -101,10 +100,11 @@ handleCommand cmd = case T.words cmd of
   ["/list"] -> handleList
   ["/nick", nickname] -> handleNick $ Nickname nickname
   "/away" : args | length args <= 1 -> handleAway $ Reason <$> maybeAt 0 args
+  "/msg" : nick : msgWords -> handlePrivateMessage nick $ T.unwords msgWords
+  ["/query", nick] -> handleQuery $ Nickname nick
+  ["/closequery"] -> handleCloseQuery
   "/notice" : msgWords -> handleNotice $ T.unwords msgWords
-  "/topic" : args | length args == 1 -> handleTopic Nothing (maybeAt 0 args)
-  "/topic" : args | length args == 2 -> do
-    handleTopic (makeChannel <$> maybeAt 0 args) (maybeAt 1 args)
+  "/topic" : args | length args <= 1 -> handleTopic (maybeAt 0 args)
   _ -> handleHelp
   where
     makeChannel ch = Channel (T.dropWhile (== '#') ch)
@@ -112,32 +112,21 @@ handleCommand cmd = case T.words cmd of
 handleJoin :: Channel -> EventM ViewportName AppState ()
 handleJoin channel = do
   st <- get
-  when (Map.notMember channel (appChannels st)) $ do
+  when (Map.notMember (ChatWithChannel channel) (appChats st)) $ do
     liftIO $ writeAction (appClient st) $ JoinChannel channel
-  let newChannelState = ChannelState mempty mempty
-  let newChannels = Map.insert channel newChannelState (appChannels st)
-  put st {appChannels = newChannels, appConversationView = ChannelView channel}
+  let chat = Chat mempty mempty 0
+  let newChats = Map.insert (ChatWithChannel channel) chat (appChats st)
+  modify $ \st' ->
+    st' {appChats = newChats, appCurrentChat = ChatWithChannel channel}
 
 handleLeave :: Maybe Channel -> Maybe Reason -> EventM ViewportName AppState ()
 handleLeave mChannel reason = do
   st <- get
-  case mChannel <|> viewToChannel (appConversationView st) of
-    Nothing -> handleHelp
-    Just channel -> do
+  case (ChatWithChannel <$> mChannel) <|> Just (appCurrentChat st) of
+    Just chatID@(ChatWithChannel channel) -> do
       liftIO $ writeAction (appClient st) $ LeaveChannel channel reason
-      let newChannels = Map.delete channel $ appChannels st
-      let channels = Map.keysSet $ appChannels st
-      let currentChannelUpdate =
-            if appConversationView st == ChannelView channel
-              then
-                if channels == Set.singleton channel
-                  then \s -> s {appConversationView = ServerView}
-                  else
-                    if Set.lookupMax channels == Just channel
-                      then goToPrevChannel
-                      else goToNextChannel
-              else id
-      modify $ (\s -> s {appChannels = newChannels}) . currentChannelUpdate
+      modify $ removeChat chatID
+    _ -> handleHelp
 
 handleList :: EventM ViewportName AppState ()
 handleList = get >>= \st -> liftIO $ writeAction (appClient st) ListChannels
@@ -145,11 +134,11 @@ handleList = get >>= \st -> liftIO $ writeAction (appClient st) ListChannels
 handleNames :: EventM ViewportName AppState ()
 handleNames = do
   st <- get
-  case appConversationView st of
-    ServerView -> pure ()
-    ChannelView channel -> do
+  case appCurrentChat st of
+    ChatWithChannel channel -> do
       liftIO $ writeAction (appClient st) (ListMembers channel)
-      modify $ modifyChannel channel $ \ch -> ch {channelNicknames = mempty}
+      modify $ updateChat (appCurrentChat st) $ \ch -> ch {chatMembers = mempty}
+    _ -> pure ()
 
 handleQuit :: Maybe Reason -> EventM ViewportName AppState ()
 handleQuit mReason = do
@@ -161,34 +150,70 @@ handleSendMessage :: Text -> EventM ViewportName AppState ()
 handleSendMessage "" = pure ()
 handleSendMessage text = do
   st <- get
-  case appConversationView st of
-    ServerView -> pure ()
-    ChannelView channel -> do
+  case appCurrentChat st of
+    ChatWithServer _ -> pure ()
+    chatID@(ChatWithChannel channel) -> do
       let target = TargetChannel channel
       liftIO $ writeAction (appClient st) $ SendMessage target text
-      -- Since we have not implemented echo-message, just append the message.
       ts <- liftIO getCurrentTime
-      modify
-        $ appendChatMessage
-          (ChatMessage ts (Just $ nickname $ appUser st) [text] Normal)
-          channel
+      let chatMsg = ChatMessage ts (Just $ nickname $ appUser st) [text] Normal
+      modify $ updateChat chatID $ appendChatMessage chatMsg
+      scrollMessagesToEnd
+    chatID@(ChatWithNickname nick) -> do
+      liftIO $ writeAction (appClient st) $ SendMessage (TargetUser nick) text
+      ts <- liftIO getCurrentTime
+      let chatMsg = ChatMessage ts (Just $ nickname $ appUser st) [text] Normal
+      modify $ updateChat chatID $ appendChatMessage chatMsg
       scrollMessagesToEnd
 
 handleNotice :: Text -> EventM ViewportName AppState ()
-handleNotice msg = case T.strip $ T.drop (T.length "/notice") msg of
+handleNotice msg = case T.strip msg of
   "" -> pure ()
-  strippedMsg -> do
+  text -> do
     st <- get
-    case appConversationView st of
-      ServerView -> pure ()
-      ChannelView channel -> do
+    case appCurrentChat st of
+      ChatWithServer _ -> pure ()
+      chatID@(ChatWithChannel channel) -> do
         let target = TargetChannel channel
-        liftIO $ writeAction (appClient st) $ SendNotice target strippedMsg
+        liftIO $ writeAction (appClient st) $ SendNotice target text
         ts <- liftIO getCurrentTime
-        let nick = nickname $ appUser st
-        let chatMsg = ChatMessage ts (Just nick) [strippedMsg] Notice
-        modify $ appendChatMessage chatMsg channel
+        let chatMsg = ChatMessage ts (Just $ nickname $ appUser st) [text] Notice
+        modify $ updateChat chatID $ appendChatMessage chatMsg
         scrollMessagesToEnd
+      chatID@(ChatWithNickname nick) -> do
+        liftIO $ writeAction (appClient st) $ SendNotice (TargetUser nick) text
+        ts <- liftIO getCurrentTime
+        let chatMsg = ChatMessage ts (Just $ nickname $ appUser st) [text] Notice
+        modify $ updateChat chatID $ appendChatMessage chatMsg
+        scrollMessagesToEnd
+
+handlePrivateMessage :: Text -> Text -> EventM ViewportName AppState ()
+handlePrivateMessage "" _ = pure ()
+handlePrivateMessage _ "" = pure ()
+handlePrivateMessage nickStr text = do
+  let nick = Nickname nickStr
+  st <- get
+  liftIO $ writeAction (appClient st) $ SendMessage (TargetUser nick) text
+  ts <- liftIO getCurrentTime
+  let chatMsg = ChatMessage ts (Just $ nickname $ appUser st) [text] Normal
+  modify $ updateChat (ChatWithNickname nick) $ appendChatMessage chatMsg
+  scrollMessagesToEnd
+
+handleQuery :: Nickname -> EventM ViewportName AppState ()
+handleQuery nick = do
+  modify $ \s ->
+    let chatID = ChatWithNickname nick
+        chat = newChat (fromList [nick, nickname $ appUser s])
+        newChats = Map.insert chatID chat $ appChats s
+     in s {appCurrentChat = chatID, appChats = newChats}
+  scrollMessagesToEnd
+
+handleCloseQuery :: EventM ViewportName AppState ()
+handleCloseQuery = do
+  AppState {..} <- get
+  case appCurrentChat of
+    chatID@(ChatWithNickname _) -> modify $ removeChat chatID
+    _ -> pure ()
 
 handleHelp :: EventM ViewportName AppState ()
 handleHelp = do
@@ -207,13 +232,14 @@ handleHelp = do
           "  /notice <message>         - Send a notice to the current channel",
           "  /topic [#channel] <topic> - View or set the channel topic",
           "  /away [reason]            - Set yourself as away",
+          "  /msg <nick> <message>     - Send a private message",
+          "  /query <nick>             - Open a private conversation",
+          "  /closequery               - Close the current private conversation",
           "  /quit [reason]            - Quit the application"
         ]
           <> T.lines keybindingsText
       chatMsg = ChatMessage ts Nothing helpMsg CommandReply
-  modify $ case appConversationView st of
-    ServerView -> appendServerChatMessage chatMsg
-    ChannelView channel -> appendChatMessage chatMsg channel
+  modify $ updateChat (appCurrentChat st) $ appendChatMessage chatMsg
   scrollMessagesToEnd
 
 handleNick :: Nickname -> EventM ViewportName AppState ()
@@ -226,9 +252,9 @@ handleAway reason = do
   st <- get
   liftIO $ writeAction (appClient st) $ SetAway reason
 
-handleTopic :: Maybe Channel -> Maybe Text -> EventM ViewportName AppState ()
-handleTopic mChannel mTopic = do
+handleTopic :: Maybe Text -> EventM ViewportName AppState ()
+handleTopic mTopic = do
   AppState {..} <- get
-  case mChannel <|> viewToChannel appConversationView of
-    Nothing -> handleHelp
-    Just channel -> liftIO $ writeAction appClient $ Topic channel mTopic
+  liftIO $ case appCurrentChat of
+    ChatWithChannel channel -> writeAction appClient $ Topic channel mTopic
+    _ -> pure ()
