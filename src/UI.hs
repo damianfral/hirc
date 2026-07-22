@@ -43,7 +43,7 @@ runUI hostname client user = do
       AppState
         { appClient = client,
           appUser = user,
-          appCurrentChannel = Nothing,
+          appConversationView = ServerView,
           appChannels = mempty,
           appHostMessages = [],
           appServer = Server $ fromString hostname,

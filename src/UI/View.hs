@@ -20,11 +20,11 @@ import UI.Style (nicknameToColorAttr, noticeAttrName)
 padX :: Int -> Widget n -> Widget n
 padX x = padLeft (Pad x) . padRight (Pad x)
 
-viewChannels :: Map Channel ChannelState -> Maybe Channel -> Widget ViewportName
-viewChannels chans current = vBox $ if Map.null chans then [] else names
+viewChannels :: Map Channel ChannelState -> ConversationView -> Widget ViewportName
+viewChannels chans currentView = vBox $ if Map.null chans then [] else names
   where
     names =
-      [ let isSelected = Just k == current
+      [ let isSelected = currentView == ChannelView k
             w = txt $ channelToText k
          in if isSelected then w else withAttr noticeAttrName w
       | (k, _v) <- Map.toList chans
@@ -77,10 +77,10 @@ viewUI AppState {..} = [vBox [mainWidget, chatBar]]
     channelListWidget =
       hLimit 24 $ borderWithLabel (txt " channels ") $ do
         withVScrollBars OnRight $ viewport Channels Vertical $ do
-          viewChannels appChannels appCurrentChannel
-    mainWidget = case appCurrentChannel of
-      Nothing -> hBox [channelListWidget, viewChatMessages (Left appServer) appHostMessages]
-      Just channel -> do
+          viewChannels appChannels appConversationView
+    mainWidget = case appConversationView of
+      ServerView -> hBox [channelListWidget, viewChatMessages (Left appServer) appHostMessages]
+      ChannelView channel -> do
         let msgs = fromMaybe [] currentChannelMessages
         hBox
           [ channelListWidget,
@@ -88,15 +88,16 @@ viewUI AppState {..} = [vBox [mainWidget, chatBar]]
             hLimit 24 $ borderWithLabel (padX 1 $ txt "members") $ do
               viewMembers $ fromMaybe mempty currentChannelNicknames
           ]
-    currentChannelMessages = case appCurrentChannel of
-      Nothing -> Just appHostMessages
-      Just chanName -> do
+    currentChannelMessages = case appConversationView of
+      ServerView -> Just appHostMessages
+      ChannelView chanName -> do
         uiChann <- Map.lookup chanName appChannels
         pure $ channelMessages uiChann
-    currentChannelNicknames = do
-      chanName <- appCurrentChannel
-      uiChann <- Map.lookup chanName appChannels
-      pure $ channelNicknames uiChann
+    currentChannelNicknames = case appConversationView of
+      ServerView -> Nothing
+      ChannelView chanName -> do
+        uiChann <- Map.lookup chanName appChannels
+        pure $ channelNicknames uiChann
     chatBar =
       vLimit (2 + length (getEditContents appInput)) $ border $ hBox $ do
         [viewNickname $ nickname appUser, padLeft (Pad 1) inputWidget]

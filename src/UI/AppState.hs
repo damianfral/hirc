@@ -41,11 +41,18 @@ modifyChannelNicknames ::
   (Set Nickname -> Set Nickname) -> ChannelState -> ChannelState
 modifyChannelNicknames f st = st {channelNicknames = f (channelNicknames st)}
 
+data ConversationView = ServerView | ChannelView Channel
+  deriving (Show, Eq)
+
+viewToChannel :: ConversationView -> Maybe Channel
+viewToChannel ServerView = Nothing
+viewToChannel (ChannelView ch) = Just ch
+
 data AppState = AppState
   { appClient :: IRCClient,
     appUser :: User,
     appChannels :: Map Channel ChannelState,
-    appCurrentChannel :: Maybe Channel,
+    appConversationView :: ConversationView,
     appServer :: Server,
     appHostMessages :: [ChatMessage],
     appInput :: Editor Text ViewportName
@@ -87,9 +94,9 @@ updateState ts (UserDisconnected user _reason) =
     chatText = nickOf user <> " disconnected"
     chatMsg = ChatMessage ts Nothing [chatText] ServerEvent
 updateState ts (ChannelListEntry channel count topic) = \st ->
-  st & case appCurrentChannel st of
-    Nothing -> appendServerChatMessage chatMsg
-    Just ch -> appendChatMessage chatMsg ch
+  st & case appConversationView st of
+    ServerView -> appendServerChatMessage chatMsg
+    ChannelView ch -> appendChatMessage chatMsg ch
   where
     countTxt = "(" <> show count <> " users)"
     chatTxts = [unwords [channelToText channel, countTxt, topic]]
@@ -149,14 +156,16 @@ updateNick old new =
   modifyAllChannels $ modifyChannelNicknames $ Set.delete old . Set.insert new
 
 goToNextChannel :: AppState -> AppState
-goToNextChannel st = fromMaybe st $ do
-  channel <- appCurrentChannel st
-  Just $ st {appCurrentChannel = Just $ nextChannel channel (appChannels st)}
+goToNextChannel st = case appConversationView st of
+  ServerView -> st
+  ChannelView channel ->
+    st {appConversationView = ChannelView $ nextChannel channel (appChannels st)}
 
 goToPrevChannel :: AppState -> AppState
-goToPrevChannel st = fromMaybe st $ do
-  channel <- appCurrentChannel st
-  Just $ st {appCurrentChannel = Just $ prevChannel channel (appChannels st)}
+goToPrevChannel st = case appConversationView st of
+  ServerView -> st
+  ChannelView channel ->
+    st {appConversationView = ChannelView $ prevChannel channel (appChannels st)}
 
 nextChannel :: Channel -> Map Channel ChannelState -> Channel
 nextChannel currentChannel channels =

@@ -116,22 +116,22 @@ handleJoin channel = do
     liftIO $ writeAction (appClient st) $ JoinChannel channel
   let newChannelState = ChannelState mempty mempty
   let newChannels = Map.insert channel newChannelState (appChannels st)
-  put st {appChannels = newChannels, appCurrentChannel = Just channel}
+  put st {appChannels = newChannels, appConversationView = ChannelView channel}
 
 handleLeave :: Maybe Channel -> Maybe Reason -> EventM ViewportName AppState ()
 handleLeave mChannel reason = do
   st <- get
-  case mChannel <|> appCurrentChannel st of
+  case mChannel <|> viewToChannel (appConversationView st) of
     Nothing -> handleHelp
     Just channel -> do
       liftIO $ writeAction (appClient st) $ LeaveChannel channel reason
       let newChannels = Map.delete channel $ appChannels st
       let channels = Map.keysSet $ appChannels st
       let currentChannelUpdate =
-            if appCurrentChannel st == Just channel
+            if appConversationView st == ChannelView channel
               then
                 if channels == Set.singleton channel
-                  then \s -> s {appCurrentChannel = Nothing}
+                  then \s -> s {appConversationView = ServerView}
                   else
                     if Set.lookupMax channels == Just channel
                       then goToPrevChannel
@@ -145,9 +145,9 @@ handleList = get >>= \st -> liftIO $ writeAction (appClient st) ListChannels
 handleNames :: EventM ViewportName AppState ()
 handleNames = do
   st <- get
-  case appCurrentChannel st of
-    Nothing -> pure ()
-    Just channel -> do
+  case appConversationView st of
+    ServerView -> pure ()
+    ChannelView channel -> do
       liftIO $ writeAction (appClient st) (ListMembers channel)
       modify $ modifyChannel channel $ \ch -> ch {channelNicknames = mempty}
 
@@ -161,9 +161,9 @@ handleSendMessage :: Text -> EventM ViewportName AppState ()
 handleSendMessage "" = pure ()
 handleSendMessage text = do
   st <- get
-  case appCurrentChannel st of
-    Nothing -> pure ()
-    Just channel -> do
+  case appConversationView st of
+    ServerView -> pure ()
+    ChannelView channel -> do
       let target = TargetChannel channel
       liftIO $ writeAction (appClient st) $ SendMessage target text
       -- Since we have not implemented echo-message, just append the message.
@@ -179,9 +179,9 @@ handleNotice msg = case T.strip $ T.drop (T.length "/notice") msg of
   "" -> pure ()
   strippedMsg -> do
     st <- get
-    case appCurrentChannel st of
-      Nothing -> pure ()
-      Just channel -> do
+    case appConversationView st of
+      ServerView -> pure ()
+      ChannelView channel -> do
         let target = TargetChannel channel
         liftIO $ writeAction (appClient st) $ SendNotice target strippedMsg
         ts <- liftIO getCurrentTime
@@ -211,9 +211,9 @@ handleHelp = do
         ]
           <> T.lines keybindingsText
       chatMsg = ChatMessage ts Nothing helpMsg CommandReply
-  modify $ case appCurrentChannel st of
-    Nothing -> appendServerChatMessage chatMsg
-    Just channel -> appendChatMessage chatMsg channel
+  modify $ case appConversationView st of
+    ServerView -> appendServerChatMessage chatMsg
+    ChannelView channel -> appendChatMessage chatMsg channel
   scrollMessagesToEnd
 
 handleNick :: Nickname -> EventM ViewportName AppState ()
@@ -229,6 +229,6 @@ handleAway reason = do
 handleTopic :: Maybe Channel -> Maybe Text -> EventM ViewportName AppState ()
 handleTopic mChannel mTopic = do
   AppState {..} <- get
-  case mChannel <|> appCurrentChannel of
+  case mChannel <|> viewToChannel appConversationView of
     Nothing -> handleHelp
     Just channel -> liftIO $ writeAction appClient $ Topic channel mTopic
