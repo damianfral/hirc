@@ -11,31 +11,11 @@ import qualified Data.Map as Map
 import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
-import Graphics.Vty
 import IRC.Domain
-import IRC.Protocol (Nickname (..), User (..))
+import IRC.Protocol (Nickname (..), Server (..), User (..))
 import Relude
 import UI.AppState
-
-channelNotSelectedAttr :: AttrName
-channelNotSelectedAttr = attrName "channelNotSelected"
-
-dimmedAttr :: AttrName
-dimmedAttr = attrName "dimmed"
-
-nicknameColors :: [Color]
-nicknameColors =
-  [brightRed, brightGreen, brightYellow, brightBlue, brightMagenta, brightCyan]
-
-nicknameColorAttr :: Int -> AttrName
-nicknameColorAttr i = attrName $ "nicknameColor" <> show i
-
-nicknameHash :: Nickname -> Int
-nicknameHash (Nickname nick) = T.foldl' (\h c -> h * 31 + fromEnum c) 0 nick
-
-nicknameToColorAttr :: Nickname -> AttrName
-nicknameToColorAttr nick =
-  nicknameColorAttr $ nicknameHash nick `mod` length nicknameColors
+import UI.Style (nicknameToColorAttr, noticeAttrName)
 
 padX :: Int -> Widget n -> Widget n
 padX x = padLeft (Pad x) . padRight (Pad x)
@@ -46,22 +26,26 @@ viewChannels chans current = vBox $ if Map.null chans then [] else names
     names =
       [ let isSelected = Just k == current
             w = txt $ channelToText k
-         in if isSelected then w else withAttr channelNotSelectedAttr w
+         in if isSelected then w else withAttr noticeAttrName w
       | (k, _v) <- Map.toList chans
       ]
 
 viewMembers :: Set Nickname -> Widget ViewportName
-viewMembers nicks = vBox $ viewColoredNickname <$> toList nicks
-  where
-    viewColoredNickname nick =
-      withAttr (nicknameToColorAttr nick) $ txt $ unNickname nick
+viewMembers nicks = withVScrollBars OnRight $ do
+  viewport ChannelMembers Vertical $ vBox $ viewNickname <$> toList nicks
 
 viewChannelName :: Channel -> Widget n
 viewChannelName = txt . channelToText
 
-viewChatMessages :: [ChatMessage] -> Widget ViewportName
-viewChatMessages msgs = withVScrollBars OnRight $ do
-  viewport Messages Vertical $ vBox $ viewChatMessage <$> msgs
+viewChatMessages ::
+  Either Server Channel -> [ChatMessage] -> Widget ViewportName
+viewChatMessages from msgs =
+  borderWithLabel (padX 1 title) $ withVScrollBars OnRight $ do
+    viewport Messages Vertical $ vBox $ viewChatMessage <$> msgs
+  where
+    title = case from of
+      Left (Server server) -> txt server
+      Right channel -> viewChannelName channel
 
 viewChatMessage :: ChatMessage -> Widget ViewportName
 viewChatMessage (ChatMessage ts Nothing msg tag) = withTagAttrs tag $ do
@@ -70,45 +54,39 @@ viewChatMessage (ChatMessage ts (Just nick) msg tag) = withTagAttrs tag $ do
   hBox [viewTime ts, padX 1 $ viewNickname nick, viewChatMessageContent msg]
 
 withTagAttrs :: Tag -> Widget n -> Widget n
-withTagAttrs Dimmed w = withAttr dimmedAttr w
-withTagAttrs _ w = w
+withTagAttrs t = withAttr (attrName (show t))
+
+-- withTagAttrs _ w = w
 
 viewChatMessageContent :: [Text] -> Widget n
 viewChatMessageContent = vBox . fmap txtWrap
 
 viewNickname :: Nickname -> Widget n
-viewNickname nick =
-  let (Nickname nickStr) = nick
-   in hLimit (T.length nickStr + 4) $ withAttr (nicknameToColorAttr nick) $ do
-        txt $ "<" <> nickStr <> ">"
+viewNickname nick@(Nickname nickStr) =
+  withAttr (nicknameToColorAttr nick) $ hLimit (T.length nickStr + 4) $ do
+    withAttr (nicknameToColorAttr nick) $ txt $ "<" <> nickStr <> ">"
 
 viewTime :: UTCTime -> Widget n
-viewTime ts =
-  let tsStr = T.pack $ formatTime defaultTimeLocale "%H:%M" ts
-   in hLimit 7 $ txt $ "[" <> tsStr <> "]"
+viewTime ts = hLimit 7 $ txt $ "[" <> tsText <> "]"
+  where
+    tsText = T.pack $ formatTime defaultTimeLocale "%H:%M" ts
 
 viewUI :: AppState -> [Widget ViewportName]
 viewUI AppState {..} = [vBox [mainWidget, chatBar]]
   where
     channelListWidget =
-      hLimit 20 $ borderWithLabel (txt " channels ") $ do
+      hLimit 24 $ borderWithLabel (txt " channels ") $ do
         withVScrollBars OnRight $ viewport Channels Vertical $ do
           viewChannels appChannels appCurrentChannel
     mainWidget = case appCurrentChannel of
-      Nothing ->
+      Nothing -> hBox [channelListWidget, viewChatMessages (Left appServer) appHostMessages]
+      Just channel -> do
+        let msgs = fromMaybe [] currentChannelMessages
         hBox
           [ channelListWidget,
-            borderWithLabel (padX 1 $ txt appHost)
-              $ viewChatMessages appHostMessages
-          ]
-      Just channel ->
-        hBox
-          [ channelListWidget,
-            borderWithLabel (padX 1 $ viewChannelName channel) $ do
-              viewChatMessages $ fromMaybe [] currentChannelMessages,
-            hLimit 20 $ borderWithLabel (padX 1 $ txt "members") $ do
-              withVScrollBars OnRight $ viewport ChannelMembers Vertical $ do
-                viewMembers $ fromMaybe mempty currentChannelNicknames
+            viewChatMessages (Right channel) msgs,
+            hLimit 24 $ borderWithLabel (padX 1 $ txt "members") $ do
+              viewMembers $ fromMaybe mempty currentChannelNicknames
           ]
     currentChannelMessages = case appCurrentChannel of
       Nothing -> Just appHostMessages

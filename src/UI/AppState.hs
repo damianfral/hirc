@@ -27,7 +27,7 @@ data ChatMessage = ChatMessage
     chatMessageTag :: Tag
   }
 
-data Tag = Normal | Dimmed | Mention
+data Tag = Normal | Notice | CommandReply | ServerEvent | Info deriving (Show)
 
 data ChannelState = ChannelState
   { channelMessages :: [ChatMessage],
@@ -46,7 +46,7 @@ data AppState = AppState
     appUser :: User,
     appChannels :: Map Channel ChannelState,
     appCurrentChannel :: Maybe Channel,
-    appHost :: Text,
+    appServer :: Server,
     appHostMessages :: [ChatMessage],
     appInput :: Editor Text ViewportName
   }
@@ -54,30 +54,30 @@ data AppState = AppState
 updateState :: UTCTime -> Event -> AppState -> AppState
 updateState ts (Connected (Server server) _welcome) = appendServerChatMessage chatMsg
   where
-    chatMsg = ChatMessage ts Nothing ["Connected to " <> server] Dimmed
+    chatMsg = ChatMessage ts Nothing ["Connected to " <> server] ServerEvent
 updateState ts (MessageReceived user (TargetChannel channel) msg) =
   appendChatMessage (ChatMessage ts (Just $ nickname user) (lines msg) Normal) channel
 updateState ts (NoticeReceived user (TargetChannel channel) msg) =
   appendChatMessage chatMsg channel
   where
-    chatMsg = ChatMessage ts (Just $ nickname user) (lines msg) Dimmed
+    chatMsg = ChatMessage ts (Just $ nickname user) (lines msg) Notice
 updateState ts (UserJoined user channel) =
   appendChatMessage chatMsg channel
     . addNicknameToChannel (nickname user) channel
   where
-    chatMsg = ChatMessage ts Nothing [nickOf user <> " joined"] Dimmed
+    chatMsg = ChatMessage ts Nothing [nickOf user <> " joined"] ServerEvent
 updateState ts (UserLeft user channel reason) =
   appendChatMessage chatMsg channel
     . removeNicknameFromChannel (nickname user) channel
   where
     reasonText = case reason of Nothing -> ""; Just (Reason r) -> ", " <> r
     chatMsg =
-      ChatMessage ts Nothing [nickOf user <> " left" <> reasonText] Dimmed
+      ChatMessage ts Nothing [nickOf user <> " left" <> reasonText] ServerEvent
 updateState ts (NickChanged user n@(Nickname nick)) =
   updateNick (nickname user) n . broadcastToAllChannels chatMsg
   where
     chatText = nickOf user <> " is now known as " <> nick
-    chatMsg = ChatMessage ts Nothing [chatText] Dimmed
+    chatMsg = ChatMessage ts Nothing [chatText] ServerEvent
 updateState _ts (ChannelUsers channel nicks) =
   modifyChannel channel $ modifyChannelNicknames (nicks <>)
 updateState ts (UserDisconnected user _reason) =
@@ -85,27 +85,29 @@ updateState ts (UserDisconnected user _reason) =
     . appendServerChatMessage chatMsg
   where
     chatText = nickOf user <> " disconnected"
-    chatMsg = ChatMessage ts Nothing [chatText] Dimmed
-updateState ts (ChannelListEntry channel count topic) =
-  appendChatMessage chatMsg channel
+    chatMsg = ChatMessage ts Nothing [chatText] ServerEvent
+updateState ts (ChannelListEntry channel count topic) = \st ->
+  st & case appCurrentChannel st of
+    Nothing -> appendServerChatMessage chatMsg
+    Just ch -> appendChatMessage chatMsg ch
   where
     countTxt = "(" <> show count <> " users)"
-    chatTxts = [unwords ["[LIST] " <> channelToText channel, countTxt, topic]]
-    chatMsg = ChatMessage ts Nothing chatTxts Dimmed
+    chatTxts = [unwords [channelToText channel, countTxt, topic]]
+    chatMsg = ChatMessage ts Nothing chatTxts CommandReply
 updateState ts (TopicReceived channel topic) = appendChatMessage chatMsg channel
   where
-    chatMsg = ChatMessage ts Nothing ["[TOPIC] " <> topic] Dimmed
+    chatMsg = ChatMessage ts Nothing [topic] Info
 updateState ts (Disconnected reason) = \st ->
   let nick@(Nickname nickTxt) = nickname $ appUser st
       chatText = nickTxt <> " disconnected, " <> reason
-      chatMsg = ChatMessage ts Nothing [chatText] Dimmed
+      chatMsg = ChatMessage ts Nothing [chatText] ServerEvent
    in removeNicknameFromAllChannels nick $ broadcastToAllChannels chatMsg st
 updateState ts (MotdLine line) = appendServerChatMessage chatMsg
   where
-    chatMsg = ChatMessage ts Nothing [line] Dimmed
+    chatMsg = ChatMessage ts Nothing [line] ServerEvent
 updateState ts (ServerMessage text) = appendServerChatMessage chatMsg
   where
-    chatMsg = ChatMessage ts Nothing [text] Dimmed
+    chatMsg = ChatMessage ts Nothing [text] Normal
 updateState _ _ = id
 
 --------------------------------------------------------------------------------

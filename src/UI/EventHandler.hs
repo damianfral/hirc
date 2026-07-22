@@ -184,7 +184,7 @@ handleNotice msg = case T.strip $ T.drop (T.length "/notice") msg of
         liftIO $ writeAction (appClient st) $ SendNotice target strippedMsg
         ts <- liftIO getCurrentTime
         let nick = nickname $ appUser st
-        let chatMsg = ChatMessage ts (Just nick) [strippedMsg] Dimmed
+        let chatMsg = ChatMessage ts (Just nick) [strippedMsg] Notice
         modify $ appendChatMessage chatMsg channel
         scrollMessagesToEnd
 
@@ -208,7 +208,7 @@ handleHelp = do
           "  /quit [reason]            - Quit the application"
         ]
           <> T.lines keybindingsText
-      chatMsg = ChatMessage ts Nothing helpMsg Dimmed
+      chatMsg = ChatMessage ts Nothing helpMsg CommandReply
   modify $ case appCurrentChannel st of
     Nothing -> appendServerChatMessage chatMsg
     Just channel -> appendChatMessage chatMsg channel

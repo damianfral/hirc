@@ -9,11 +9,12 @@ import Control.Concurrent.Async (async, cancel)
 import qualified Graphics.Vty as V
 import Graphics.Vty.CrossPlatform (mkVty)
 import IRC.Client
-import IRC.Protocol (User (..))
+import IRC.Protocol (Server (..), User (..))
 import Network.Socket (HostName)
 import Relude
 import UI.AppState
 import UI.EventHandler (handleEvent)
+import UI.Style (attributes)
 import UI.View
 
 uiApp :: App AppState Event ViewportName
@@ -25,14 +26,6 @@ uiApp =
       appStartEvent = pure (),
       appAttrMap = const $ A.attrMap V.defAttr attributes
     }
-  where
-    attributes =
-      [ (channelNotSelectedAttr, V.defAttr `V.withStyle` V.dim),
-        (dimmedAttr, V.defAttr `V.withStyle` V.dim)
-      ]
-        <> do
-          (i, color) <- zip [0 ..] nicknameColors
-          [(nicknameColorAttr i, V.defAttr {V.attrForeColor = V.SetTo color})]
 
 runUI :: HostName -> IRCClient -> User -> IO ()
 runUI hostname client user = do
@@ -53,7 +46,7 @@ runUI hostname client user = do
           appCurrentChannel = Nothing,
           appChannels = mempty,
           appHostMessages = [],
-          appHost = toText hostname,
+          appServer = Server $ fromString hostname,
           appInput = emptyEditor
         }
 
