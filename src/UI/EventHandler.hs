@@ -39,19 +39,18 @@ handleEvent (AppEvent event) = do
   ts <- liftIO getCurrentTime
   modify $ updateState ts event
   scrollMessagesToEnd
-handleEvent (MouseDown vp direction _mods _location) = do
-  let scrollLines = case direction of
-        V.BScrollUp -> (-4)
-        V.BScrollDown -> 4
-        _ -> 0
-  vScrollBy (viewportScroll vp) scrollLines
+handleEvent (MouseDown vp direction _mods _location) =
+  case direction of
+    V.BScrollUp -> handleScroll vp Brick.Up
+    V.BScrollDown -> handleScroll vp Brick.Down
+    _ -> pure ()
 handleEvent (MouseUp {}) = pure ()
 
 scrollMessagesToEnd :: EventM ViewportName s ()
 scrollMessagesToEnd = vScrollToEnd $ viewportScroll Messages
 
-handleScroll :: Direction -> EventM ViewportName s ()
-handleScroll = vScrollPage (viewportScroll Messages)
+handleScroll :: ViewportName -> Direction -> EventM ViewportName s ()
+handleScroll = vScrollPage . viewportScroll
 
 -- TODO: we are ignoring conflicting keybindings
 keyDispatcher :: Maybe (KD.KeyDispatcher KeyEvent (EventM ViewportName AppState))
@@ -62,8 +61,9 @@ keyDispatcher = case KD.keyDispatcher keyConfig keyEventHandlers of
 keyEventHandlers :: [KD.KeyEventHandler KeyEvent (EventM ViewportName AppState)]
 keyEventHandlers =
   [ KD.onEvent EvQuit "Quit the application" haltWithQuit,
-    KD.onEvent EvScrollUp "Scroll messages up" $ handleScroll Brick.Up,
-    KD.onEvent EvScrollDown "Scroll messages down" $ handleScroll Brick.Down,
+    KD.onEvent EvScrollUp "Scroll messages up" $ handleScroll Messages Brick.Up,
+    KD.onEvent EvScrollDown "Scroll messages down" $ do
+      handleScroll Messages Brick.Down,
     KD.onEvent EvNextChannel "Go to next channel" $ do
       modify goToNextChannel >> scrollMessagesToEnd,
     KD.onEvent EvPrevChannel "Go to previous channel" $ do
