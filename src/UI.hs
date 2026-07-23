@@ -39,7 +39,11 @@ runUI hostname client user = do
   where
     buildVty = do
       v <- mkVty V.defaultConfig
-      V.setMode (V.outputIface v) V.Mouse True -- mouse support
+      let output = V.outputIface v
+      let supportsMouse = V.supportsMode output V.Mouse
+      let supportsBracketedPaste = V.supportsMode output V.BracketedPaste
+      when supportsMouse $ V.setMode output V.Mouse True
+      when supportsBracketedPaste $ V.setMode output V.BracketedPaste True
       pure v
     server = Server $ fromString hostname
     initialState =
