@@ -14,7 +14,7 @@ import IRC.Protocol (Server (..), User (..))
 import Network.Socket (HostName)
 import Relude
 import UI.AppState
-import UI.Chat (Chat (Chat), ChatID (ChatWithServer))
+import UI.Chat (ChatID (ChatWithServer))
 import UI.EventHandler (handleEvent)
 import UI.Style (attributes)
 import UI.View
@@ -51,7 +51,7 @@ runUI hostname client user = do
         { appClient = client,
           appUser = user,
           appCurrentChat = ChatWithServer server,
-          appChats = Map.singleton (ChatWithServer server) (Chat mempty mempty 0),
+          appChats = Map.singleton (ChatWithServer server) mempty,
           appServer = server,
           appInput = emptyEditor
         }

@@ -100,7 +100,8 @@ handleCommand cmd = case T.words cmd of
   ["/list"] -> handleList
   ["/nick", nickname] -> handleNick $ Nickname nickname
   "/away" : args | length args <= 1 -> handleAway $ Reason <$> maybeAt 0 args
-  "/msg" : nick : msgWords -> handlePrivateMessage nick $ T.unwords msgWords
+  "/msg" : nick : msgWords ->
+    handlePrivateMessage (Nickname nick) $ T.unwords msgWords
   ["/query", nick] -> handleQuery $ Nickname nick
   ["/closequery"] -> handleCloseQuery
   "/notice" : msgWords -> handleNotice $ T.unwords msgWords
@@ -114,8 +115,7 @@ handleJoin channel = do
   st <- get
   when (Map.notMember (ChatWithChannel channel) (appChats st)) $ do
     liftIO $ writeAction (appClient st) $ JoinChannel channel
-  let chat = Chat mempty mempty 0
-  let newChats = Map.insert (ChatWithChannel channel) chat (appChats st)
+  let newChats = Map.insert (ChatWithChannel channel) mempty (appChats st)
   modify $ \st' ->
     st' {appChats = newChats, appCurrentChat = ChatWithChannel channel}
 
@@ -150,19 +150,17 @@ handleSendMessage :: Text -> EventM ViewportName AppState ()
 handleSendMessage "" = pure ()
 handleSendMessage text = do
   st <- get
+  ts <- liftIO getCurrentTime
+  let chatMsg = ChatMessage ts (Just $ nickname $ appUser st) [text] Normal
   case appCurrentChat st of
     ChatWithServer _ -> pure ()
     chatID@(ChatWithChannel channel) -> do
       let target = TargetChannel channel
       liftIO $ writeAction (appClient st) $ SendMessage target text
-      ts <- liftIO getCurrentTime
-      let chatMsg = ChatMessage ts (Just $ nickname $ appUser st) [text] Normal
       modify $ updateChat chatID $ appendChatMessage chatMsg
       scrollMessagesToEnd
     chatID@(ChatWithNickname nick) -> do
       liftIO $ writeAction (appClient st) $ SendMessage (TargetUser nick) text
-      ts <- liftIO getCurrentTime
-      let chatMsg = ChatMessage ts (Just $ nickname $ appUser st) [text] Normal
       modify $ updateChat chatID $ appendChatMessage chatMsg
       scrollMessagesToEnd
 
@@ -171,27 +169,22 @@ handleNotice msg = case T.strip msg of
   "" -> pure ()
   text -> do
     st <- get
+    ts <- liftIO getCurrentTime
+    let chatMsg = ChatMessage ts (Just $ nickname $ appUser st) [text] Notice
     case appCurrentChat st of
       ChatWithServer _ -> pure ()
       chatID@(ChatWithChannel channel) -> do
         let target = TargetChannel channel
         liftIO $ writeAction (appClient st) $ SendNotice target text
-        ts <- liftIO getCurrentTime
-        let chatMsg = ChatMessage ts (Just $ nickname $ appUser st) [text] Notice
         modify $ updateChat chatID $ appendChatMessage chatMsg
         scrollMessagesToEnd
       chatID@(ChatWithNickname nick) -> do
         liftIO $ writeAction (appClient st) $ SendNotice (TargetUser nick) text
-        ts <- liftIO getCurrentTime
-        let chatMsg = ChatMessage ts (Just $ nickname $ appUser st) [text] Notice
         modify $ updateChat chatID $ appendChatMessage chatMsg
         scrollMessagesToEnd
 
-handlePrivateMessage :: Text -> Text -> EventM ViewportName AppState ()
-handlePrivateMessage "" _ = pure ()
-handlePrivateMessage _ "" = pure ()
-handlePrivateMessage nickStr text = do
-  let nick = Nickname nickStr
+handlePrivateMessage :: Nickname -> Text -> EventM ViewportName AppState ()
+handlePrivateMessage nick text = do
   st <- get
   liftIO $ writeAction (appClient st) $ SendMessage (TargetUser nick) text
   ts <- liftIO getCurrentTime

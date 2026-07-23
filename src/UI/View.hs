@@ -8,7 +8,6 @@ import Brick
 import Brick.Widgets.Border (border, borderWithLabel)
 import Brick.Widgets.Edit (getEditContents, renderEditor)
 import qualified Data.Map as Map
-import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
@@ -25,16 +24,13 @@ padX x = padLeft (Pad x) . padRight (Pad x)
 -- TODO: Unread count
 viewChannels :: AppState -> Widget ViewportName
 viewChannels AppState {..} = vBox $ do
-  let chatIDs = Map.keysSet appChats
-      isServerChat (ChatWithServer _) = True
-      isServerChat _ = False
-      filteredChatIDs = toList $ Set.filter (not . isServerChat) chatIDs
+  let chatIDs = Map.keys appChats
   if appChats == mempty
     then []
-    else (\cid -> viewChatID (cid == appCurrentChat) cid) <$> filteredChatIDs
+    else (\cid -> viewChatID (cid == appCurrentChat) cid) <$> chatIDs
 
 viewChatID :: Bool -> ChatID -> Widget n
-viewChatID _ (ChatWithServer (Server s)) = txt $ " " <> s <> " "
+viewChatID _ (ChatWithServer (Server _)) = emptyWidget
 viewChatID isCurrent (ChatWithChannel (Channel c)) =
   stylize isCurrent $ txt $ "#" <> c
 viewChatID isCurrent (ChatWithNickname nick@(Nickname n)) =
