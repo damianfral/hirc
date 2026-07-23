@@ -7,6 +7,7 @@ module UI.AppState where
 import Brick.Widgets.Edit
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import qualified Data.Text as T
 import Data.Time.Clock (UTCTime)
 import IRC.Client
 import IRC.Domain
@@ -42,9 +43,19 @@ updateState ts (NoticeReceived user (TargetChannel channel) msg) =
   let chatMsg = ChatMessage ts (Just $ nickname user) (lines msg) Notice
    in updateChat (ChatWithChannel channel) $ appendChatMessage chatMsg
 updateState ts (NoticeReceived user (TargetUser _) msg) =
-  let nick = nickname user
-      chatMsg = ChatMessage ts (Just nick) (lines msg) Notice
-   in updateChat (ChatWithNickname nick) $ appendChatMessage chatMsg
+  let routeToChannel = do
+        afterHash <- T.stripPrefix "[#" msg
+        let (chanName, _) = T.break (== ']') afterHash
+        guard $ not (T.null chanName)
+        Just chanName
+   in case routeToChannel of
+        Just chanName ->
+          let chatMsg = ChatMessage ts (Just $ nickname user) (lines msg) Notice
+           in updateChat (ChatWithChannel (Channel chanName)) $ appendChatMessage chatMsg
+        Nothing ->
+          let nick = nickname user
+              chatMsg = ChatMessage ts (Just nick) (lines msg) Notice
+           in updateChat (ChatWithNickname nick) $ appendChatMessage chatMsg
 updateState ts (UserJoined user channel) =
   let chatMsg = ChatMessage ts Nothing [nickOf user <> " joined"] ServerEvent
    in updateChat
