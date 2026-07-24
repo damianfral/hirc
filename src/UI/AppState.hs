@@ -61,13 +61,13 @@ updateState ts (UserJoined user channel) =
    in updateChat
         (ChatWithChannel channel)
         (appendChatMessage chatMsg . addNickname (nickname user))
-updateState ts (UserLeft user channel reason) =
+updateState ts (UserLeft user channel reason) = \st ->
   let reasonText = case reason of Nothing -> ""; Just (Reason r) -> ", " <> r
       chatText = nickOf user <> " left," <> reasonText
       chatMsg = ChatMessage ts Nothing [chatText] ServerEvent
-   in updateChat
-        (ChatWithChannel channel)
-        (appendChatMessage chatMsg . addNickname (nickname user))
+      chatID = ChatWithChannel channel
+      update = appendChatMessage chatMsg . addNickname (nickname user)
+   in if user /= appUser st then updateChat chatID update st else st
 updateState ts (NickChanged user newNick@(Nickname n)) = \st ->
   let oldNick = nickname user
       hasUser = (oldNick `Set.member`) . chatMembers
