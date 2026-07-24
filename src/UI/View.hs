@@ -16,7 +16,7 @@ import IRC.Protocol (Nickname (..), Server (..), User (..))
 import Relude
 import UI.AppState
 import UI.Chat
-import UI.Style (nicknameToColorAttr, noticeAttrName)
+import UI.Style (channelToColorAttr, nicknameToColorAttr, noticeAttrName)
 
 padX :: Int -> Widget n -> Widget n
 padX x = padLeft (Pad x) . padRight (Pad x)
@@ -31,8 +31,8 @@ viewChannels AppState {..} = vBox $ do
 
 viewChatID :: Bool -> ChatID -> Widget n
 viewChatID _ (ChatWithServer (Server _)) = emptyWidget
-viewChatID isCurrent (ChatWithChannel (Channel c)) =
-  stylize isCurrent $ txt $ "#" <> c
+viewChatID isCurrent (ChatWithChannel channel@(Channel c)) =
+  withAttr (channelToColorAttr channel) $ stylize isCurrent $ txt $ "#" <> c
 viewChatID isCurrent (ChatWithNickname nick@(Nickname n)) =
   withAttr (nicknameToColorAttr nick) $ stylize isCurrent $ txt $ "@" <> n
 

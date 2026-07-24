@@ -6,6 +6,7 @@ import Brick
 import qualified Data.Text as T
 import Graphics.Vty
 import qualified Graphics.Vty.Attributes as V
+import IRC.Domain (Channel (Channel))
 import IRC.Protocol (Nickname (..))
 import Relude
 import UI.Chat (Tag (..))
@@ -20,7 +21,7 @@ attributes =
     )
   ]
     <> do
-      (i, color) <- zip [0 ..] nicknameColors
+      (i, color) <- zip [0 ..] nameColors
       [(nicknameColorAttr i, V.defAttr `V.withForeColor` color)]
 
 infoAttrName :: AttrName
@@ -38,16 +39,20 @@ commandReplyAttrName = attrName $ show CommandReply
 serverEventAttrName :: AttrName
 serverEventAttrName = attrName $ show ServerEvent
 
-nicknameColors :: [Color]
-nicknameColors =
+nameColors :: [Color]
+nameColors =
   [brightRed, brightGreen, brightYellow, brightBlue, brightMagenta, brightCyan]
 
 nicknameColorAttr :: Int -> AttrName
 nicknameColorAttr i = attrName $ "nicknameColor" <> show i
 
-nicknameHash :: Nickname -> Int
-nicknameHash (Nickname nick) = T.foldl' (\h c -> h * 31 + fromEnum c) 0 nick
+textHash :: Text -> Int
+textHash = T.foldl' (\h c -> h * 31 + fromEnum c) 0
 
 nicknameToColorAttr :: Nickname -> AttrName
-nicknameToColorAttr nick =
-  nicknameColorAttr $ nicknameHash nick `mod` length nicknameColors
+nicknameToColorAttr (Nickname nick) =
+  nicknameColorAttr $ textHash nick `mod` length nameColors
+
+channelToColorAttr :: Channel -> AttrName
+channelToColorAttr (Channel channel) =
+  nicknameColorAttr $ textHash channel `mod` length nameColors
