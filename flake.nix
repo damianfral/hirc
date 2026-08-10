@@ -8,8 +8,6 @@
     pre-commit-hooks.url = "github:cachix/git-hooks.nix";
     pre-commit-hooks.inputs.nixpkgs.follows = "nixpkgs";
     feedback.url = "github:NorfairKing/feedback";
-    sydtest.url = "github:NorfairKing/sydtest";
-    opt-env-conf.url = "github:NorfairKing/opt-env-conf";
     brick = {
       url = "github:jtdaugherty/brick";
       flake = false;
@@ -28,11 +26,7 @@
     pkgsFor = system:
       import nixpkgs {
         inherit system;
-        overlays = [
-          self.overlays.default
-          inputs.opt-env-conf.overlays.${system}
-          inputs.sydtest.overlays.${system}
-        ];
+        overlays = [self.overlays.default];
       };
     src = nix-filter.lib {
       root = ./.;
